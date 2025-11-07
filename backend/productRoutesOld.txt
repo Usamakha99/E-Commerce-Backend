@@ -75,7 +75,7 @@ router.get('/imports', productController.getimportsProducts);
 router.post('/', uploadFiles, productController.createProduct);
 router.get('/', productController.getProducts);
 router.get('/:id', productController.getProduct);
-// router.put('/:id', uploadFiles, productController.updateProduct); // This is the problematic route
+router.put('/:id', uploadFiles, productController.updateProduct); // This is the problematic route
 // router.delete('/:id', productController.deleteProduct);
 
 module.exports = router;
