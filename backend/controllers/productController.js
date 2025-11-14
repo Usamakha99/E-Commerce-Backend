@@ -78,7 +78,10 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { 
+    fileSize: 10 * 1024 * 1024, // 10MB per file
+    files: 11 // Max 11 files total (1 main + 10 detail images)
+  },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
@@ -1934,80 +1937,71 @@ exports.getimportsProducts = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
-    uploadFiles(req, res, async (err) => {
-      if (err) return res.status(400).json({ error: err.message });
+    console.log("Request body:", req.body);
+    console.log("Request files:", req.files);
 
-      try {
-        console.log("Request body:", req.body);
-        console.log("Request files:", req.files);
+    const productData = {
+      sku: req.body.sku || null,
+      mfr: req.body.mfr || null,
+      techPartNo: req.body.techPartNo || null,
+      shortDescp: req.body.shortDescp || null,
+      longDescp: req.body.longDescp || null,
+      metaTitle: req.body.metaTitle || null,
+      metaDescp: req.body.metaDescp || null,
+      upcCode: req.body.upcCode || null,
+      productSource: req.body.productSource || null,
+      userId: req.body.userId || null,
+      title: req.body.title || null,
+      price: req.body.price ? parseFloat(req.body.price) : 0.0,
+      quantity: req.body.quantity ? parseInt(req.body.quantity) : 0,
+      brandId: req.body.brandId || null,
+      categoryId: req.body.categoryId || null,
+      subCategoryId: req.body.subCategoryId || null,
+    };
 
-        const productData = {
-          sku: req.body.sku || null,
-          mfr: req.body.mfr || null,
-          techPartNo: req.body.techPartNo || null,
-          shortDescp: req.body.shortDescp || null,
-          longDescp: req.body.longDescp || null,
-          metaTitle: req.body.metaTitle || null,
-          metaDescp: req.body.metaDescp || null,
-          upcCode: req.body.upcCode || null,
-          productSource: req.body.productSource || null,
-          userId: req.body.userId || null,
-          title: req.body.title || null,
-          price: req.body.price ? parseFloat(req.body.price) : 0.0,
-          quantity: req.body.quantity ? parseInt(req.body.quantity) : 0,
-          brandId: req.body.brandId || null,
-          categoryId: req.body.categoryId || null,
-          subCategoryId: req.body.subCategoryId || null,
-        };
+    if (!productData.sku)
+      return res.status(400).json({ error: "SKU is required" });
+    if (!productData.title)
+      return res.status(400).json({ error: "Title is required" });
 
-        if (!productData.sku)
-          return res.status(400).json({ error: "SKU is required" });
-        if (!productData.title)
-          return res.status(400).json({ error: "Title is required" });
+    if (productData.brandId)
+      productData.brandId = parseInt(productData.brandId);
+    if (productData.categoryId)
+      productData.categoryId = parseInt(productData.categoryId);
+    if (productData.subCategoryId)
+      productData.subCategoryId = parseInt(productData.subCategoryId);
 
-        if (productData.brandId)
-          productData.brandId = parseInt(productData.brandId);
-        if (productData.categoryId)
-          productData.categoryId = parseInt(productData.categoryId);
-        if (productData.subCategoryId)
-          productData.subCategoryId = parseInt(productData.subCategoryId);
+    if (req.files?.mainImage)
+      productData.mainImage = req.files.mainImage[0].filename;
 
-        if (req.files?.mainImage)
-          productData.mainImage = req.files.mainImage[0].filename;
+    console.log("Product data to create:", productData);
 
-        console.log("Product data to create:", productData);
+    const product = await Product.create(productData);
 
-        const product = await Product.create(productData);
-
-        if (req.files?.detailImages) {
-          const imagePromises = req.files.detailImages.map(async (file) => {
-            await Image.create({
-              imageTitle: file.originalname,
-              url: file.filename,
-              productId: product.id,
-            });
-          });
-          await Promise.all(imagePromises);
-        }
-
-        const productWithRelations = await Product.findByPk(product.id, {
-          include: [
-            { model: Brand, as: "brand" },
-            { model: Category, as: "category" },
-            { model: SubCategory, as: "subCategory" },
-            { model: Image, as: "images" },
-          ],
+    if (req.files?.detailImages) {
+      const imagePromises = req.files.detailImages.map(async (file) => {
+        await Image.create({
+          imageTitle: file.originalname,
+          url: file.filename,
+          productId: product.id,
         });
+      });
+      await Promise.all(imagePromises);
+    }
 
-        res.status(201).json(productWithRelations);
-      } catch (error) {
-        console.error("Error creating product:", error);
-        res.status(500).json({ error: error.message });
-      }
+    const productWithRelations = await Product.findByPk(product.id, {
+      include: [
+        { model: Brand, as: "brand" },
+        { model: Category, as: "category" },
+        { model: SubCategory, as: "subCategory" },
+        { model: Image, as: "images" },
+      ],
     });
-  } catch (err) {
-    console.error("Unexpected error:", err);
-    res.status(500).json({ error: err.message });
+
+    res.status(201).json(productWithRelations);
+  } catch (error) {
+    console.error("Error creating product:", error);
+    res.status(500).json({ error: error.message });
   }
 };
 

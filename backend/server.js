@@ -18,7 +18,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, "uploads");
@@ -92,6 +92,25 @@ try {
 } catch (error) {
   console.error("❌ Error loading analytics routes:", error.message);
 }
+
+// ============================================
+// 🔥 USER/AUTH ROUTES - ADD THIS CODE 🔥
+// ============================================
+try {
+  const userRoutes = require("./routes/userRoutes");
+  app.use("/api/users", userRoutes);
+  console.log("✅✅✅ USER ROUTES REGISTERED ✅✅✅");
+  console.log("   📍 /api/users/register");
+  console.log("   📍 /api/users/login");
+  console.log("   📍 /api/users/verify-email");
+  console.log("   📍 /api/users/resend-verification");
+} catch (error) {
+  console.error("❌❌❌ USER ROUTES FAILED:", error.message);
+}
+// ============================================
+// 🔥 END USER ROUTES 🔥
+// ============================================
+
 // --- Health Check ---
 app.get("/", (req, res) => {
   res.json({
