@@ -1,7 +1,4 @@
 import { Link } from 'react-router-dom';
-import logoDark from '@/assets/images/logo-dark.png';
-import logoLight from '@/assets/images/logo-light.png';
-import logoSm from '@/assets/images/logo-sm.png';
 const LogoBox = ({
   containerClassName,
   squareLogo,
@@ -9,12 +6,10 @@ const LogoBox = ({
 }) => {
   return <div className={containerClassName ?? ''}>
       <Link to="/" className="logo-dark">
-        <img src={logoSm} className={squareLogo?.className} height={squareLogo?.height ?? 30} width={squareLogo?.width ?? 19} alt="logo sm" />
-        <img src={logoDark} className={textLogo?.className} height={textLogo?.height ?? 20} width={textLogo?.width ?? 60} alt="logo dark" />
+        <img src="/V Cloud Logo final-01.svg" className={textLogo?.className} height={textLogo?.height ?? 40} width={textLogo?.width ?? 200} alt="V Cloud Logo" style={{ objectFit: 'contain' }} />
       </Link>
       <Link to="/" className="logo-light">
-        <img src={logoSm} className={squareLogo?.className} height={squareLogo?.height ?? 30} width={squareLogo?.width ?? 19} alt="logo sm" />
-        <img src={logoLight} className={textLogo?.className} height={textLogo?.height ?? 20} width={textLogo?.width ?? 60} alt="logo light" />
+        <img src="/V Cloud Logo final-01.svg" className={textLogo?.className} height={textLogo?.height ?? 40} width={textLogo?.width ?? 200} alt="V Cloud Logo" style={{ objectFit: 'contain' }} />
       </Link>
     </div>;
 };

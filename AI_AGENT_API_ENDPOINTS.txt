@@ -1,0 +1,160 @@
+==========================================
+AI AGENT API ENDPOINTS
+==========================================
+
+Base URL: http://localhost:5000/api/aiagents
+
+==========================================
+1. CREATE AI AGENT
+==========================================
+POST /api/aiagents
+
+Request Body:
+{
+  "name": "Agent Name",
+  "provider": "Provider Name",
+  "logo": "logo-url",
+  "shortDescription": "Short description",
+  "description": "Full description",
+  "overview": "Overview text",
+  "highlights": ["Highlight 1", "Highlight 2"],
+  "badges": ["Badge 1", "Badge 2"],
+  "videoThumbnail": "thumbnail-url",
+  "rating": 4.5,
+  "awsReviews": 1,
+  "externalReviews": 999,
+  "freeTrial": true,
+  "deployedOnAWS": true,
+  "awsFreeTier": false,
+  "deliveryMethodId": 1,
+  "publisherId": 1,
+  "soldBy": "Sold By Name",
+  "categoryIds": [1, 2, 3],
+  "featuresContent": {...},
+  "resourcesContent": {...},
+  "supportContent": {...},
+  "productComparisonContent": {...},
+  "pricingContent": {...}
+}
+
+Response: { success: true, data: {...} }
+
+==========================================
+2. GET ALL AI AGENTS
+==========================================
+GET /api/aiagents
+
+Query Parameters:
+- page=1
+- limit=10
+- search=search-term
+- categoryId=1
+- deliveryMethodId=1
+- publisherId=1
+- freeTrial=true
+- deployedOnAWS=true
+- sortBy=name
+- sortOrder=ASC|DESC
+
+Example:
+GET /api/aiagents?page=1&limit=20&search=okta&categoryId=1
+
+Response: { success: true, data: [...], pagination: {...} }
+
+==========================================
+3. GET SINGLE AI AGENT
+==========================================
+GET /api/aiagents/:id
+
+Parameters:
+- id: Agent ID or slug
+
+Examples:
+GET /api/aiagents/1
+GET /api/aiagents/okta-platform
+
+Response: { success: true, data: {...} }
+
+==========================================
+4. UPDATE AI AGENT
+==========================================
+PUT /api/aiagents/:id
+
+Request Body: (All fields optional)
+{
+  "name": "Updated Name",
+  "rating": 4.8,
+  "featuresContent": {...},
+  "pricingContent": {...}
+  // ... any fields to update
+}
+
+Response: { success: true, data: {...} }
+
+==========================================
+5. DELETE AI AGENT
+==========================================
+DELETE /api/aiagents/:id
+
+Response: { success: true, message: "AI Agent deleted successfully" }
+
+==========================================
+6. GET CATEGORIES WITH COUNTS
+==========================================
+GET /api/aiagents/categories/counts
+
+Response: { success: true, data: [{ id, name, slug, count }] }
+
+==========================================
+7. GET DELIVERY METHODS WITH COUNTS
+==========================================
+GET /api/aiagents/delivery-methods/counts
+
+Response: { success: true, data: [{ id, name, slug, count }] }
+
+==========================================
+8. GET PUBLISHERS WITH COUNTS
+==========================================
+GET /api/aiagents/publishers/counts
+
+Response: { success: true, data: [{ id, name, slug, count }] }
+
+==========================================
+QUICK EXAMPLES
+==========================================
+
+// Create Agent
+POST http://localhost:5000/api/aiagents
+Content-Type: application/json
+{
+  "name": "Test Agent",
+  "provider": "Test Provider"
+}
+
+// Get All Agents
+GET http://localhost:5000/api/aiagents?page=1&limit=10
+
+// Get Single Agent
+GET http://localhost:5000/api/aiagents/1
+
+// Update Agent
+PUT http://localhost:5000/api/aiagents/1
+Content-Type: application/json
+{
+  "name": "Updated Name"
+}
+
+// Delete Agent
+DELETE http://localhost:5000/api/aiagents/1
+
+// Get Categories
+GET http://localhost:5000/api/aiagents/categories/counts
+
+// Get Delivery Methods
+GET http://localhost:5000/api/aiagents/delivery-methods/counts
+
+// Get Publishers
+GET http://localhost:5000/api/aiagents/publishers/counts
+
+==========================================
+

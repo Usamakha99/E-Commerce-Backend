@@ -6,7 +6,6 @@ import PageBreadcrumb from '@/components/layout/PageBreadcrumb';
 import { currency } from '@/context/constants';
 import SubmissionButton from './components/SubmissionButton';
 import PageMetaData from '@/components/PageTitle';
-import logoDark from '@/assets/images/logo-dark.png';
 const InvoiceDetail = () => {
   const [invoice, setInvoice] = useState();
   const {
@@ -32,7 +31,7 @@ const InvoiceDetail = () => {
                 <div className="clearfix">
                   <div className="float-sm-end">
                     <div className="auth-logo">
-                      <img className="logo-dark me-1" src={logoDark} alt="logo-dark" height={24} />
+                      <img className="logo-dark me-1" src="/V Cloud Logo final-01.svg" alt="V Cloud Logo" height={24} style={{ objectFit: 'contain' }} />
                     </div>
                     <address className="mt-3">
                       1729 Bangor St,

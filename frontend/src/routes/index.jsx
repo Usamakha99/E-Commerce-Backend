@@ -15,6 +15,20 @@ const EcommerceCategoryCreate = lazy(() => import('@/app/(admin)/ecommerce/categ
 const EcommerceSubCategoryCreate = lazy(() => import('@/app/(admin)/ecommerce/subcategory/create/page'));
 const EcommerceTechProductCreate = lazy(() => import('@/app/(admin)/ecommerce/techproduct/create/page'));
 const EcommerceTechProductNameCreate = lazy(() => import('@/app/(admin)/ecommerce/techproductname/create/page'));
+const EcommerceProductTags = lazy(() => import('@/app/(admin)/ecommerce/producttag/page'));
+const EcommerceProductTagCreate = lazy(() => import('@/app/(admin)/ecommerce/producttag/create/page'));
+const EcommerceProductsByTag = lazy(() => import('@/app/(admin)/ecommerce/producttag/[tagId]/page'));
+const EcommerceAIAgents = lazy(() => import('@/app/(admin)/ecommerce/aiagent/page'));
+const EcommerceAIAgentCreate = lazy(() => import('@/app/(admin)/ecommerce/aiagent/create/page'));
+const EcommerceAIAgentDetail = lazy(() => import('@/app/(admin)/ecommerce/aiagent/[agentId]/page'));
+const EcommerceAICategories = lazy(() => import('@/app/(admin)/ecommerce/aicategory/page'));
+const EcommerceAICategoryCreate = lazy(() => import('@/app/(admin)/ecommerce/aicategory/create/page'));
+const EcommerceDeliveryMethods = lazy(() => import('@/app/(admin)/ecommerce/deliverymethod/page'));
+const EcommerceDeliveryMethodCreate = lazy(() => import('@/app/(admin)/ecommerce/deliverymethod/create/page'));
+const EcommercePublishers = lazy(() => import('@/app/(admin)/ecommerce/publisher/page'));
+const EcommercePublisherCreate = lazy(() => import('@/app/(admin)/ecommerce/publisher/create/page'));
+const EcommerceInquiries = lazy(() => import('@/app/(admin)/ecommerce/inquiries/page'));
+const EcommerceInquiryDetail = lazy(() => import('@/app/(admin)/ecommerce/inquiries/[inquiryId]/page'));
 const EcommerceCustomers = lazy(() => import('@/app/(admin)/ecommerce/customers/page'));
 const EcommerceSellers = lazy(() => import('@/app/(admin)/ecommerce/sellers/page'));
 const EcommerceOrders = lazy(() => import('@/app/(admin)/ecommerce/orders/page'));
@@ -190,7 +204,76 @@ const appsRoutes = [{
   path: '/ecommerce/TechProductNames/create',
   element: <EcommerceTechProductNameCreate />
 },
-
+{
+  name: 'Product Tags',
+  path: '/ecommerce/producttags',
+  element: <EcommerceProductTags />
+},
+{
+  name: 'Create Product Tag',
+  path: '/ecommerce/producttags/create',
+  element: <EcommerceProductTagCreate />
+},
+{
+  name: 'Products by Tag',
+  path: '/ecommerce/producttags/:tagId',
+  element: <EcommerceProductsByTag />
+},
+{
+  name: 'AI Agents',
+  path: '/ecommerce/aiagents',
+  element: <EcommerceAIAgents />
+},
+{
+  name: 'Create AI Agent',
+  path: '/ecommerce/aiagents/create',
+  element: <EcommerceAIAgentCreate />
+},
+{
+  name: 'AI Agent Detail',
+  path: '/ecommerce/aiagents/:agentId',
+  element: <EcommerceAIAgentDetail />
+},
+{
+  name: 'AI Categories',
+  path: '/ecommerce/aicategories',
+  element: <EcommerceAICategories />
+},
+{
+  name: 'Create AI Category',
+  path: '/ecommerce/aicategories/create',
+  element: <EcommerceAICategoryCreate />
+},
+{
+  name: 'Delivery Methods',
+  path: '/ecommerce/deliverymethods',
+  element: <EcommerceDeliveryMethods />
+},
+{
+  name: 'Create Delivery Method',
+  path: '/ecommerce/deliverymethods/create',
+  element: <EcommerceDeliveryMethodCreate />
+},
+{
+  name: 'Publishers',
+  path: '/ecommerce/publishers',
+  element: <EcommercePublishers />
+},
+{
+  name: 'Create Publisher',
+  path: '/ecommerce/publishers/create',
+  element: <EcommercePublisherCreate />
+},
+{
+  name: 'Inquiry Details',
+  path: '/ecommerce/inquiries/:inquiryId',
+  element: <EcommerceInquiryDetail />
+},
+{
+  name: 'Product Inquiries',
+  path: '/ecommerce/inquiries',
+  element: <EcommerceInquiries />
+},
 {
   name: 'Customers',
   path: '/ecommerce/customers',

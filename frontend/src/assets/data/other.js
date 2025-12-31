@@ -14,7 +14,7 @@ export const timelineData = {
     title: 'Yes! We are celebrating our first admin release.',
     description: 'Consectetur adipisicing elit. Iusto, optio, dolorumJohn deonprovident.'
   }, {
-    title: 'We released new version of our theme Reback.',
+    title: 'We released new version of our theme V Cloud Tech.',
     description: '3 new photo Uploaded on facebook fan page'
   }],
   Yesterday: [{
@@ -28,7 +28,7 @@ export const timelineData = {
     title: 'Join new team member Alex Smith',
     description: 'Alex Smith is a Senior Software (Full Stack) engineer with a deep passion for building usable, functional & pretty web applications.'
   }, {
-    title: 'First release of Reback admin dashboard template',
+    title: 'First release of V Cloud Tech admin dashboard template',
     description: 'Outdoor visit at California State Route 85 with John Boltana & Harry Piterson regarding to setup a new show room.'
   }]
 };

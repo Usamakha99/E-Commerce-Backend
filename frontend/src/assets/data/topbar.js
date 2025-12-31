@@ -15,11 +15,11 @@ import avatar7 from '@/assets/images/users/avatar-7.jpg';
 export const appsData = [{
   image: githubImg,
   name: 'Github',
-  handle: '@reback'
+  handle: '@vcloudtech'
 }, {
   image: bitbucketImg,
   name: 'Bitbucket',
-  handle: '@reback'
+  handle: '@vcloudtech'
 }, {
   image: dribbleImg,
   name: 'Dribble',
@@ -31,7 +31,7 @@ export const appsData = [{
 }, {
   image: slackImg,
   name: 'Slack',
-  handle: '@reback'
+  handle: '@vcloudtech'
 }];
 export const notificationsData = [{
   from: 'Josephine Thompson',
@@ -59,7 +59,7 @@ export const activityStreamData = [{
   files: [{
     name: 'Concept.fig'
   }, {
-    name: 'reback.docs'
+    name: 'vcloudtech.docs'
   }],
   time: addOrSubtractDaysFromDate(0)
 }, {
@@ -72,7 +72,7 @@ export const activityStreamData = [{
   status: 'completed',
   time: addOrSubtractDaysFromDate(1)
 }, {
-  title: 'Reback Application UI v2.0.0',
+  title: 'V Cloud Tech Application UI v2.0.0',
   variant: 'primary',
   content: 'Get access to over 20+ pages including a dashboard layout, charts, kanban board, calendar, and pre-order E-commerce & Marketing pages.',
   files: [{

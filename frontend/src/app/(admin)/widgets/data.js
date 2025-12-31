@@ -46,7 +46,7 @@ export const scheduleData = [{
   duration: '09:00 - 10:00'
 }, {
   time: '10:00',
-  title: 'Design Review - Reback Admin',
+  title: 'Design Review - V Cloud Tech',
   variant: 'success',
   duration: '10:00 - 10:30'
 }, {
