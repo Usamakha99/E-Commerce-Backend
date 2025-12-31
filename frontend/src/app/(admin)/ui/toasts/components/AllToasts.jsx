@@ -2,8 +2,6 @@ import useToggle from '@/hooks/useToggle';
 import { useState } from 'react';
 import { Button, Col, Form, Row, Toast, ToastBody, ToastContainer, ToastHeader } from 'react-bootstrap';
 import ReactSelect from 'react-select';
-import logoDark from '@/assets/images/logo-dark.png';
-import logoLight from '@/assets/images/logo-light.png';
 import ComponentContainerCard from '@/components/ComponentContainerCard';
 const BasicToast = () => {
   const {
@@ -17,8 +15,8 @@ const BasicToast = () => {
       <Toast className="fade d-block opacity-100" role="alert" onClose={hide} show={!isOpen}>
         <ToastHeader closeButton>
           <div className="auth-logo d-inline-block me-auto">
-            <img className="logo-dark" src={logoDark} alt="logo-dark" height={18} />
-            <img className="logo-light" src={logoLight} alt="logo-light" height={18} />
+            <img className="logo-dark" src="/V Cloud Logo final-01.svg" alt="V Cloud Logo" height={18} style={{ objectFit: 'contain' }} />
+            <img className="logo-light" src="/V Cloud Logo final-01.svg" alt="V Cloud Logo" height={18} style={{ objectFit: 'contain' }} />
           </div>
           <div className="float-end">
             <small>11 mins ago</small>

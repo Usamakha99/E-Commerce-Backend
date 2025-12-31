@@ -33,9 +33,22 @@ app.use("/uploads", express.static(uploadsDir));
 // --- Auto-register all routes in /routes ---
 const routesPath = path.join(__dirname, "routes");
 
+// Routes that are manually registered (exclude from auto-registration)
+const manuallyRegisteredRoutes = [
+  "cartRoutes.js",
+  "orderRoutes.js",
+  "analyticsRoutes.js",
+  "userRoutes.js",
+  "productInquiryRoutes.js", // Manually registered with correct plural
+  "aiAgentRoutes.js", // Manually registered
+  "aiCategoryRoutes.js", // Manually registered
+  "deliveryMethodRoutes.js", // Manually registered
+  "publisherRoutes.js", // Manually registered
+];
+
 if (fs.existsSync(routesPath)) {
   fs.readdirSync(routesPath).forEach((file) => {
-    if (file.endsWith("Routes.js")) {
+    if (file.endsWith("Routes.js") && !manuallyRegisteredRoutes.includes(file)) {
       try {
         console.log(`🔍 Loading route: ${file}`);
         const route = require(path.join(routesPath, file));
@@ -109,6 +122,105 @@ try {
 }
 // ============================================
 // 🔥 END USER ROUTES 🔥
+// ============================================
+
+// ============================================
+// 🔥 PRODUCT INQUIRY ROUTES 🔥
+// ============================================
+try {
+  const productInquiryRoutes = require("./routes/productInquiryRoutes");
+  app.use("/api/productinquiries", productInquiryRoutes);
+  console.log("✅✅✅ PRODUCT INQUIRY ROUTES REGISTERED ✅✅✅");
+  console.log("   📍 POST /api/productinquiries");
+  console.log("   📍 GET /api/productinquiries");
+  console.log("   📍 GET /api/productinquiries/stats");
+  console.log("   📍 GET /api/productinquiries/:id");
+  console.log("   📍 PUT /api/productinquiries/:id");
+  console.log("   📍 DELETE /api/productinquiries/:id");
+} catch (error) {
+  console.error("❌❌❌ PRODUCT INQUIRY ROUTES FAILED:", error.message);
+}
+// ============================================
+// 🔥 END PRODUCT INQUIRY ROUTES 🔥
+// ============================================
+
+// ============================================
+// 🔥 AI AGENT ROUTES 🔥
+// ============================================
+try {
+  const aiAgentRoutes = require("./routes/aiAgentRoutes");
+  app.use("/api/aiagents", aiAgentRoutes);
+  console.log("✅✅✅ AI AGENT ROUTES REGISTERED ✅✅✅");
+  console.log("   📍 POST /api/aiagents");
+  console.log("   📍 GET /api/aiagents");
+  console.log("   📍 GET /api/aiagents/categories/counts");
+  console.log("   📍 GET /api/aiagents/delivery-methods/counts");
+  console.log("   📍 GET /api/aiagents/publishers/counts");
+  console.log("   📍 GET /api/aiagents/:id");
+  console.log("   📍 PUT /api/aiagents/:id");
+  console.log("   📍 DELETE /api/aiagents/:id");
+} catch (error) {
+  console.error("❌❌❌ AI AGENT ROUTES FAILED:", error.message);
+}
+// ============================================
+// 🔥 END AI AGENT ROUTES 🔥
+// ============================================
+
+// ============================================
+// 🔥 AI CATEGORY ROUTES 🔥
+// ============================================
+try {
+  const aiCategoryRoutes = require("./routes/aiCategoryRoutes");
+  app.use("/api/aicategories", aiCategoryRoutes);
+  console.log("✅✅✅ AI CATEGORY ROUTES REGISTERED ✅✅✅");
+  console.log("   📍 POST /api/aicategories");
+  console.log("   📍 GET /api/aicategories");
+  console.log("   📍 GET /api/aicategories/:id");
+  console.log("   📍 PUT /api/aicategories/:id");
+  console.log("   📍 DELETE /api/aicategories/:id");
+} catch (error) {
+  console.error("❌❌❌ AI CATEGORY ROUTES FAILED:", error.message);
+}
+// ============================================
+// 🔥 END AI CATEGORY ROUTES 🔥
+// ============================================
+
+// ============================================
+// 🔥 DELIVERY METHOD ROUTES 🔥
+// ============================================
+try {
+  const deliveryMethodRoutes = require("./routes/deliveryMethodRoutes");
+  app.use("/api/deliverymethods", deliveryMethodRoutes);
+  console.log("✅✅✅ DELIVERY METHOD ROUTES REGISTERED ✅✅✅");
+  console.log("   📍 POST /api/deliverymethods");
+  console.log("   📍 GET /api/deliverymethods");
+  console.log("   📍 GET /api/deliverymethods/:id");
+  console.log("   📍 PUT /api/deliverymethods/:id");
+  console.log("   📍 DELETE /api/deliverymethods/:id");
+} catch (error) {
+  console.error("❌❌❌ DELIVERY METHOD ROUTES FAILED:", error.message);
+}
+// ============================================
+// 🔥 END DELIVERY METHOD ROUTES 🔥
+// ============================================
+
+// ============================================
+// 🔥 PUBLISHER ROUTES 🔥
+// ============================================
+try {
+  const publisherRoutes = require("./routes/publisherRoutes");
+  app.use("/api/publishers", publisherRoutes);
+  console.log("✅✅✅ PUBLISHER ROUTES REGISTERED ✅✅✅");
+  console.log("   📍 POST /api/publishers");
+  console.log("   📍 GET /api/publishers");
+  console.log("   📍 GET /api/publishers/:id");
+  console.log("   📍 PUT /api/publishers/:id");
+  console.log("   📍 DELETE /api/publishers/:id");
+} catch (error) {
+  console.error("❌❌❌ PUBLISHER ROUTES FAILED:", error.message);
+}
+// ============================================
+// 🔥 END PUBLISHER ROUTES 🔥
 // ============================================
 
 // --- Health Check ---

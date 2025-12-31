@@ -60,6 +60,7 @@ router.get('/manufacturers', productController.getManufacturers);
 router.get('/filter', productController.filterProducts);
 router.get('/filter/brands', productController.getFilterBrands);
 router.get('/filter/categories', productController.getFilterCategories);
+router.get('/filter/tag', productController.getProductsByTag);
 router.get('/search', productController.advancedSearch);
 router.get('/quick-search', productController.searchProducts);
 

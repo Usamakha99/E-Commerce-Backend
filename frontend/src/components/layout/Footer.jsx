@@ -8,7 +8,7 @@ const Footer = () => {
           <Col xs={12} className="text-center">
             <span className="icons-center">
               {' '}
-              {currentYear} © Reback. Crafted with&nbsp;
+              {currentYear} © V Cloud Tech. Crafted with&nbsp;
               <IconifyIcon icon="iconamoon:heart-duotone" className="fs-18 align-middle text-danger" />
               &nbsp;by&nbsp;
               <a href={developedByLink} className="fw-bold footer-text" target="_blank">

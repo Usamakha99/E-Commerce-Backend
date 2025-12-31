@@ -12,7 +12,7 @@ import RecentTransactions from './components/RecentTransactions';
 import PageMetaData from '@/components/PageTitle';
 const Widgets = () => {
   return <>
-      <PageBreadcrumb subName="Reback" title="Widgets" />
+      <PageBreadcrumb subName="V Cloud Tech" title="Widgets" />
       <PageMetaData title="Widgets" />
 
       <Stats />

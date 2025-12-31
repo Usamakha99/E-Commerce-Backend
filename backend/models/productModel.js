@@ -131,6 +131,18 @@ module.exports = (sequelize) => {
     foreignKey: "productId",
     as: "galleries",
   });
+    // Many-to-many relationship with ProductTags
+    Product.belongsToMany(models.ProductTag, {
+      through: "ProductTagProducts",
+      foreignKey: "productId",
+      otherKey: "productTagId",
+      as: "tags",
+    });
+    // One-to-many relationship with ProductInquiries
+    Product.hasMany(models.ProductInquiry, {
+      foreignKey: "productId",
+      as: "inquiries",
+    });
   };
 
   // Method to reduce product quantity

@@ -676,6 +676,32 @@ export const testPriceAPI = async () => {
   }
 };
 
+/**
+ * Get products filtered by tag ID or tag name
+ */
+export const getProductsByTag = async (params = {}) => {
+  try {
+    const response = await api.get('/api/products/filter/tag', { params });
+    return response.data;
+  } catch (error) {
+    const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to fetch products by tag';
+    throw new Error(errorMessage);
+  }
+};
+
+/**
+ * Filter products with tag support
+ */
+export const filterProducts = async (params = {}) => {
+  try {
+    const response = await api.get('/api/products/filter', { params });
+    return response.data;
+  } catch (error) {
+    const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to filter products';
+    throw new Error(errorMessage);
+  }
+};
+
 // Export all functions as default object for backward compatibility
 const ProductAPI = {
   // Brand status functions (NEW)
@@ -706,7 +732,9 @@ const ProductAPI = {
   getPricesBySeller,
   getProductWithPrices,
   getPriceSellers,
-  testPriceAPI
+  testPriceAPI,
+  getProductsByTag,
+  filterProducts
 };
 
 export default ProductAPI;

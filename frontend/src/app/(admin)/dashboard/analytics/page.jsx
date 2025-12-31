@@ -1,36 +1,36 @@
 import { Col, Row } from 'react-bootstrap';
 import PageBreadcrumb from '@/components/layout/PageBreadcrumb';
 import PageMetaData from '@/components/PageTitle';
-import Conversions from './components/Conversions';
-import SessionByBrowser from './components/SessionByBrowser';
-import SessionsByCountry from './components/SessionsByCountry';
 import Stats from './components/Stats';
-import TopPages from './components/TopPages';
-export default function Home() {
-  return <>
-      <PageBreadcrumb title="Analytics" subName="Dashboards" />
-      <PageMetaData title="Analytics" />
+import RecentProducts from './components/RecentProducts';
+import RecentAIAgents from './components/RecentAIAgents';
+import CategoryDistribution from './components/CategoryDistribution';
 
-      <Row>
+export default function Dashboard() {
+  return (
+    <>
+      <PageBreadcrumb title="Dashboard" subName="Dashboards" />
+      <PageMetaData title="Dashboard" />
+
+      {/* Statistics Cards */}
+      <Row className="mb-4">
         <Col xxl={3}>
           <Stats />
         </Col>
         <Col xxl={9}>
-          <Conversions />
+          <CategoryDistribution />
         </Col>
       </Row>
+
+      {/* Recent Items */}
       <Row>
-        <Col xs={12}>
-          <SessionsByCountry />
+        <Col lg={6}>
+          <RecentProducts />
+        </Col>
+        <Col lg={6}>
+          <RecentAIAgents />
         </Col>
       </Row>
-      <Row>
-        <Col lg={4}>
-          <SessionByBrowser />
-        </Col>
-        <Col lg={8}>
-          <TopPages />
-        </Col>
-      </Row>
-    </>;
+    </>
+  );
 }

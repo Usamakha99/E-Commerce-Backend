@@ -14,6 +14,7 @@ const ProductImportItem = db.ProductImportItem;
 const TechSpecGroup = db.TechSpecGroup;
 const Gallery = db.Gallery;
 const ProductPrice = db.ProductPrice;
+const ProductTag = db.ProductTag;
 const https = require('https');
 const { Op } = require("sequelize");
 const axios = require("axios");
@@ -2037,6 +2038,12 @@ exports.getProduct = async (req, res) => {
           order: [["orderIndex", "ASC"]],
         },
         { model: db.Gallery, as: "galleries", order: [["orderIndex", "ASC"]] },
+        {
+          model: ProductTag,
+          as: "tags",
+          through: { attributes: [] },
+          required: false,
+        },
       ],
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
@@ -2460,6 +2467,8 @@ exports.filterProducts = async (req, res) => {
     const {
       brands,
       categories,
+      tags,
+      tagId,
       mfr,
       minPrice,
       maxPrice,
@@ -2512,14 +2521,44 @@ exports.filterProducts = async (req, res) => {
       ? sortOrder.toUpperCase()
       : "ASC";
 
+    // Build include array
+    const includeArray = [
+      { model: Brand, as: "brand" },
+      { model: Category, as: "category" },
+      { model: SubCategory, as: "subCategory" },
+      { model: Image, as: "images" },
+    ];
+
+    // Add tag filtering if tagId or tags provided
+    let tagFilter = null;
+    if (tagId) {
+      tagFilter = { id: parseInt(tagId) };
+    } else if (tags) {
+      const tagArray = Array.isArray(tags) ? tags : tags.split(",");
+      tagFilter = { id: { [Op.in]: tagArray.map(id => parseInt(id)) } };
+    }
+
+    if (tagFilter) {
+      includeArray.push({
+        model: ProductTag,
+        as: "tags",
+        where: tagFilter,
+        through: { attributes: [] },
+        required: true, // INNER JOIN - only products with this tag
+      });
+    } else {
+      // Include tags even if not filtering
+      includeArray.push({
+        model: ProductTag,
+        as: "tags",
+        through: { attributes: [] },
+        required: false,
+      });
+    }
+
     const { count, rows: products } = await Product.findAndCountAll({
       where: whereClause,
-      include: [
-        { model: Brand, as: "brand" },
-        { model: Category, as: "category" },
-        { model: SubCategory, as: "subCategory" },
-        { model: Image, as: "images" },
-      ],
+      include: includeArray,
       order: [[finalSortBy, finalSortOrder]],
       limit: parseInt(limit),
       offset: parseInt(offset),
@@ -2538,6 +2577,7 @@ exports.filterProducts = async (req, res) => {
       filters: {
         brands: brands || "all",
         categories: categories || "all",
+        tags: tags || tagId || "all",
         manufacturer: mfr || "all",
         priceRange: { min: minPrice || "any", max: maxPrice || "any" },
         inStock: inStock || "any",
@@ -2551,6 +2591,94 @@ exports.filterProducts = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || "Failed to filter products",
+    });
+  }
+};
+
+// Get products by tag ID or tag name
+exports.getProductsByTag = async (req, res) => {
+  try {
+    const { tagId, tagName, page = 1, limit = 20, sortBy = "title", sortOrder = "ASC" } = req.query;
+    
+    if (!tagId && !tagName) {
+      return res.status(400).json({
+        success: false,
+        error: "Either tagId or tagName is required",
+      });
+    }
+
+    // Find the tag
+    let tag;
+    if (tagId) {
+      tag = await ProductTag.findByPk(parseInt(tagId));
+    } else {
+      tag = await ProductTag.findOne({
+        where: {
+          [Op.or]: [
+            { name: { [Op.iLike]: `%${tagName}%` } },
+            { slug: { [Op.iLike]: `%${tagName}%` } },
+          ],
+        },
+      });
+    }
+
+    if (!tag) {
+      return res.status(404).json({
+        success: false,
+        error: "Tag not found",
+      });
+    }
+
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const validSortFields = ["title", "price", "createdAt", "updatedAt"];
+    const validSortOrders = ["ASC", "DESC"];
+    const finalSortBy = validSortFields.includes(sortBy) ? sortBy : "title";
+    const finalSortOrder = validSortOrders.includes(sortOrder.toUpperCase())
+      ? sortOrder.toUpperCase()
+      : "ASC";
+
+    const { count, rows: products } = await Product.findAndCountAll({
+      include: [
+        { model: Brand, as: "brand" },
+        { model: Category, as: "category" },
+        { model: SubCategory, as: "subCategory" },
+        { model: Image, as: "images" },
+        {
+          model: ProductTag,
+          as: "tags",
+          where: { id: tag.id },
+          through: { attributes: [] },
+          required: true,
+        },
+      ],
+      order: [[finalSortBy, finalSortOrder]],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      distinct: true,
+    });
+
+    res.status(200).json({
+      success: true,
+      tag: {
+        id: tag.id,
+        name: tag.name,
+        slug: tag.slug,
+        color: tag.color,
+        description: tag.description,
+      },
+      data: products,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count,
+        pages: Math.ceil(count / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error("Error getting products by tag:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Failed to get products by tag",
     });
   }
 };

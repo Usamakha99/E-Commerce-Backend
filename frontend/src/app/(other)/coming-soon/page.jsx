@@ -2,9 +2,6 @@ import { Card, CardBody, Col } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import PageMetaData from '@/components/PageTitle';
 import Timer from './components/Timer';
-import logoDark from '@/assets/images/logo-dark.png';
-import logoLight from '@/assets/images/logo-light.png';
-import logoSm from '@/assets/images/logo-sm.png';
 const ComingSoon = () => {
   return <>
       <PageMetaData title="Coming Soon" />
@@ -14,12 +11,10 @@ const ComingSoon = () => {
           <CardBody>
             <div className="mx-auto text-center auth-logo my-5">
               <Link to="/" className="logo-dark">
-                <img src={logoSm} height={30} className="me-1" alt="logo sm" />
-                <img src={logoDark} height={24} alt="logo dark" />
+                <img src="/V Cloud Logo final-01.svg" height={40} alt="V Cloud Logo" style={{ objectFit: 'contain' }} />
               </Link>
               <Link to="/" className="logo-light">
-                <img src={logoSm} height={30} className="me-1" alt="logo sm" />
-                <img src={logoLight} height={24} alt="logo light" />
+                <img src="/V Cloud Logo final-01.svg" height={40} alt="V Cloud Logo" style={{ objectFit: 'contain' }} />
               </Link>
             </div>
             <h2 className="fw-semibold">We Are Launching Soon...</h2>
