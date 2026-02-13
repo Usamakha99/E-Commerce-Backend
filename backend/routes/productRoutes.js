@@ -36,6 +36,7 @@ const uploadFiles = upload.fields([
 ]);
 
 // ===== BRAND COUNT ROUTES =====
+router.get('/count', productController.getProductsCount);
 router.get('/count/by-brand', productController.getProductCountByBrand);
 router.get('/count/by-specific-brands', productController.getProductCountBySpecificBrands);
 
@@ -72,8 +73,17 @@ router.post('/activate-immediately', productController.activateProductImmediatel
 // ===== ICECAT IMPORT ROUTES =====
 router.post('/import', productController.importProduct);
 router.post('/bulk-import', productController.bulkImportProducts);
+router.post('/import-from-ftp-cache', productController.importFromFtpCache);
+router.post('/sync-vcloudtech-to-icecat', productController.syncVcloudtechToIcecat);
 router.get('/bulk-import/:jobId', productController.getBulkImportStatus);
+router.get('/import-jobs/recent', productController.getRecentImportJobs);
+router.get('/import-jobs/export-excel', productController.exportImportJobExcel);
+router.get('/import-jobs/:jobId', productController.getBulkImportStatus);
 router.get('/imports', productController.getimportsProducts);
+
+// ===== ENRICH FROM ICECAT (cache in DB; avoid re-downloading stored images) =====
+router.post('/enrich-from-icecat-bulk', productController.enrichBulkFromIcecat);
+router.post('/:id/enrich-from-icecat', productController.enrichProductFromIcecat);
 
 // ===== BASIC CRUD ROUTES =====
 router.post('/', uploadFiles, productController.createProduct);

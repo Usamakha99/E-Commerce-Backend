@@ -11,21 +11,29 @@ const ProductBulletPoint = db.ProductBulletPoint;
 const ProductForImport = db.productForImport;
 const ProductImportJob = db.ProductImportJob;
 const ProductImportItem = db.ProductImportItem;
+const FtpProductCache = db.FtpProductCache;
 const TechSpecGroup = db.TechSpecGroup;
 const Gallery = db.Gallery;
 const ProductPrice = db.ProductPrice;
 const ProductTag = db.ProductTag;
+const ftpProductsApiService = require("../services/ftpProductsApiService");
 const https = require('https');
 const { Op } = require("sequelize");
 const axios = require("axios");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const XLSX = require("xlsx");
 
 // ===== UTILITY FUNCTIONS =====
 
 // Utility function for delayed execution (rate limiting)
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// If true, Icecat description overwrites existing DB description (FTP descriptions are often weak).
+// Can be overridden per-request via query `?overwriteDescription=true|false` on enrich endpoints.
+const ICECAT_OVERWRITE_DESCRIPTION =
+  (process.env.ICECAT_OVERWRITE_DESCRIPTION || "true").toLowerCase() === "true";
 
 
 
@@ -597,13 +605,37 @@ const extractUPC = (icecatData) => {
   }
 };
 
-// Helper function: Check if product already exists
+/** Return true if a product with this SKU + brand (by name) already exists. Used to skip when cron restarts so we don't re-process. */
+const productExistsBySkuAndBrandName = async (productCode, brandName) => {
+  const code = (productCode || "").trim();
+  const brand = (brandName || "").trim();
+  if (!code || !brand) return false;
+  const brandRecord = await Brand.findOne({
+    where: db.sequelize.where(db.sequelize.fn("LOWER", db.sequelize.fn("TRIM", db.sequelize.col("title"))), brand.toLowerCase()),
+  });
+  if (!brandRecord) return false;
+  const skuLower = code.toLowerCase();
+  const existing = await Product.findOne({
+    where: {
+      [Op.and]: [
+        db.sequelize.where(db.sequelize.fn("LOWER", db.sequelize.fn("TRIM", db.sequelize.col("sku"))), skuLower),
+        { brandId: brandRecord.id },
+      ],
+    },
+  });
+  return !!existing;
+};
+
+// Helper function: Check if product already exists (SKU matched case-insensitively to avoid duplicates)
 const findExistingProduct = async (productCode, brandId, upc, icecatData) => {
   try {
+    const skuLower = (productCode || "").trim().toLowerCase();
     const productBySku = await Product.findOne({
       where: {
-        sku: productCode,
-        brandId: brandId,
+        [Op.and]: [
+          db.sequelize.where(db.sequelize.fn("LOWER", db.sequelize.fn("TRIM", db.sequelize.col("sku"))), skuLower),
+          { brandId },
+        ],
       },
     });
 
@@ -691,31 +723,55 @@ const cleanupProductAssets = async (productId) => {
   }
 };
 
+// Decide if a product already has images stored in our DB.
+// This is used to avoid re-downloading/overwriting images from Icecat.
+const productHasStoredImages = async (product) => {
+  if (!product) return false;
+  if (product.mainImage && String(product.mainImage).trim() !== "") return true;
+  const productId = product.id;
+  if (!productId) return false;
+
+  const [imageCount, galleryCount] = await Promise.all([
+    Image.count({ where: { productId } }),
+    Gallery.count({ where: { productId } }),
+  ]);
+
+  return imageCount > 0 || galleryCount > 0;
+};
+
 // Helper function to process additional product data
 const processAdditionalProductData = async (
   icecatData,
   productId,
-  productCode
+  productCode,
+  options = {}
 ) => {
   try {
+    const {
+      skipDocuments = false,
+      skipBulletPoints = false,
+      skipGallery = false,
+      skipTechSpecs = false,
+    } = options;
+
     const multimediaData = icecatData.data?.Multimedia;
-    if (multimediaData) {
+    if (!skipDocuments && multimediaData) {
       await processProductDocuments(multimediaData, productId);
     }
 
     const generatedBulletPoints = icecatData.data?.GeneratedBulletPoints;
-    if (generatedBulletPoints) {
+    if (!skipBulletPoints && generatedBulletPoints) {
       await processBulletPoints(generatedBulletPoints, productId);
     }
 
     // Process gallery images - SAVES TO GALLERY TABLE
     const gallery = icecatData.data?.Gallery;
-    if (gallery) {
+    if (!skipGallery && gallery) {
       await processGalleryImages(gallery, productId, productCode);
     }
 
     const featuresGroups = icecatData.data?.FeaturesGroups;
-    if (featuresGroups) {
+    if (!skipTechSpecs && featuresGroups) {
       for (const group of featuresGroups) {
         let techSpecGroup = await TechSpecGroup.findOne({
           where: { title: group.FeatureGroup?.Name?.Value },
@@ -767,11 +823,74 @@ const processAdditionalProductData = async (
 const processSingleProduct = async (
   productData,
   jobId = null,
-  importProduct = null
+  importProduct = null,
+  options = {}
 ) => {
-  const { productCode, brand, price, quantity, index } = productData;
+  const { onlyStoreOnIcecatMatch = false } = options;
+  const { productCode, brand, price, quantity, weight, dimensions, index } = productData;
 
   try {
+    // Ensure brand exists – match case-insensitively to avoid duplicate brands (e.g. "C2G" vs "c2g")
+    const brandTrimmed = (brand || "").trim();
+    let brandRecord = await Brand.findOne({
+      where: db.sequelize.where(db.sequelize.fn("LOWER", db.sequelize.fn("TRIM", db.sequelize.col("title"))), brandTrimmed.toLowerCase()),
+    });
+    if (!brandRecord) {
+      brandRecord = await Brand.create({ title: brandTrimmed });
+    }
+
+    // Reusable: find product by SKU (case-insensitive) + brandId to avoid duplicates from casing differences
+    const skuLower = (productCode || "").trim().toLowerCase();
+    const productBySkuBrandWhere = {
+      [Op.and]: [
+        db.sequelize.where(db.sequelize.fn("LOWER", db.sequelize.fn("TRIM", db.sequelize.col("sku"))), skuLower),
+        { brandId: brandRecord.id },
+      ],
+    };
+    let existingBySkuBrand = await Product.findOne({ where: productBySkuBrandWhere });
+    if (existingBySkuBrand) {
+      const hasImages = await productHasStoredImages(existingBySkuBrand);
+      const hasDescription =
+        (existingBySkuBrand.shortDescp &&
+          String(existingBySkuBrand.shortDescp).trim() !== "") ||
+        (existingBySkuBrand.longDescp &&
+          String(existingBySkuBrand.longDescp).trim() !== "");
+      const hasIcecatCached =
+        existingBySkuBrand.productSource === "icecat" && hasDescription;
+
+      // If overwrite is enabled, only skip when we already have Icecat description cached.
+      if (hasImages && hasDescription && (!ICECAT_OVERWRITE_DESCRIPTION || hasIcecatCached)) {
+        if (importProduct) {
+          await importProduct.update({
+            status: "active",
+            lastUpdated: new Date(),
+            mainProductId: existingBySkuBrand.id,
+            errorMessage: null,
+          });
+        }
+
+        if (jobId) {
+          await ProductImportItem.create({
+            jobId: jobId,
+            productCode: productCode,
+            brand: brand,
+            productId: existingBySkuBrand.id,
+            status: "completed",
+            orderIndex: index,
+          });
+        }
+
+        return {
+          productCode,
+          brand,
+          status: "skipped",
+          productId: existingBySkuBrand.id,
+          title: existingBySkuBrand.title,
+          message: "Already cached (images + description). Skipped Icecat call.",
+        };
+      }
+    }
+
     console.log(`🔍 Calling Icecat API for: ${productCode} - ${brand}`);
 
     const response = await callIcecatAPIWithRetry(productCode, brand, 3);
@@ -781,15 +900,139 @@ const processSingleProduct = async (
         `❌ Product not found in Icecat database: ${productCode} - ${brand}`
       );
 
-      if (importProduct) {
-        await importProduct.update({
-          status: "pending",
-          lastUpdated: new Date(),
-          errorMessage: "Product not found in Icecat database (404)",
-        });
-        console.log(
-          `🔄 Updated ${productCode} status to PENDING (not found in Icecat)`
-        );
+      // When onlyStoreOnIcecatMatch: never store in DB if Icecat doesn't match (no cache, no minimal product).
+      if (onlyStoreOnIcecatMatch) {
+        return {
+          productCode,
+          brand,
+          status: "failed",
+          error: "Product not found in Icecat database (404)",
+        };
+      }
+
+      // For FTP cache import (jobId) or external queue (importProduct): create minimal product so it shows in frontend;
+      // images/description can be enriched later if Icecat adds it in future.
+      const canCreateMinimal = importProduct || jobId;
+      if (canCreateMinimal) {
+        try {
+          const category = await ensureCategoryExists(1);
+          const subCategory = await ensureSubCategoryExists(null, category.id);
+
+          if (!existingBySkuBrand) {
+            existingBySkuBrand = await Product.findOne({ where: productBySkuBrandWhere });
+          }
+
+          const upcFromImport = importProduct?.upcCode ?? null;
+          // Re-check right before create to avoid duplicate (e.g. another run created same sku+brand)
+          if (!existingBySkuBrand) {
+            existingBySkuBrand = await Product.findOne({ where: productBySkuBrandWhere });
+          }
+          const product = existingBySkuBrand
+            ? await (async () => {
+                await Product.update(
+                  {
+                    mfr: existingBySkuBrand.mfr || productCode,
+                    title: existingBySkuBrand.title || `${productCode} - ${brand}`,
+                    upcCode: existingBySkuBrand.upcCode || upcFromImport,
+                    productSource: existingBySkuBrand.productSource || "external_api",
+                    price: price != null ? price : existingBySkuBrand.price,
+                    quantity: quantity != null ? quantity : existingBySkuBrand.quantity,
+                    weight: weight != null ? weight : existingBySkuBrand.weight,
+                    dimensions: dimensions || existingBySkuBrand.dimensions,
+                    brandId: existingBySkuBrand.brandId || brandRecord.id,
+                    categoryId: existingBySkuBrand.categoryId || category.id,
+                    subCategoryId: existingBySkuBrand.subCategoryId || subCategory.id,
+                  },
+                  { where: { id: existingBySkuBrand.id } }
+                );
+                return await Product.findByPk(existingBySkuBrand.id);
+              })()
+            : await (async () => {
+                // One more find before create to avoid race duplicate
+                const again = await Product.findOne({ where: productBySkuBrandWhere });
+                if (again) {
+                  await Product.update(
+                    {
+                      mfr: again.mfr || productCode,
+                      title: again.title || `${productCode} - ${brand}`,
+                      upcCode: again.upcCode || upcFromImport,
+                      productSource: again.productSource || "external_api",
+                      price: price ?? again.price,
+                      quantity: quantity ?? again.quantity,
+                      weight: weight != null ? weight : again.weight,
+                      dimensions: dimensions || again.dimensions,
+                    },
+                    { where: { id: again.id } }
+                  );
+                  return await Product.findByPk(again.id);
+                }
+                return await Product.create({
+                  sku: productCode,
+                  mfr: productCode,
+                  title: `${productCode} - ${brand}`,
+                  mainImage: null,
+                  shortDescp: null,
+                  longDescp: null,
+                  metaTitle: null,
+                  metaDescp: null,
+                  upcCode: upcFromImport,
+                  productSource: "external_api",
+                  userId: 1,
+                  price: price || 0,
+                  quantity: quantity || 0,
+                  weight: weight != null ? weight : null,
+                  dimensions: dimensions || null,
+                  brandId: brandRecord.id,
+                  categoryId: category.id,
+                  subCategoryId: subCategory.id,
+                  bulletsPoint: null,
+                });
+              })();
+
+          if (importProduct) {
+            await importProduct.update({
+              status: "active",
+              mainProductId: product.id,
+              lastUpdated: new Date(),
+              errorMessage: "Created from catalog; not found in Icecat (404)",
+            });
+          }
+
+          if (jobId) {
+            await ProductImportItem.create({
+              jobId: jobId,
+              productCode: productCode,
+              brand: brand,
+              productId: product.id,
+              status: "completed",
+              orderIndex: index,
+            });
+          }
+
+          return {
+            productCode,
+            brand,
+            status: "success",
+            productId: product.id,
+            title: product.title,
+            message:
+              "Created minimal product (Icecat 404). Images/description can be enriched later.",
+          };
+        } catch (e) {
+          if (importProduct) {
+            await importProduct.update({
+              status: "pending",
+              lastUpdated: new Date(),
+              errorMessage: `Icecat 404; minimal create failed: ${e.message}`,
+            });
+          }
+          return {
+            productCode,
+            brand,
+            status: "failed",
+            error: `Minimal product create failed: ${e.message}`,
+          };
+        }
       }
 
       return {
@@ -861,11 +1104,6 @@ const processSingleProduct = async (
 
     const upc = extractUPC(response.data);
 
-    let brandRecord = await Brand.findOne({ where: { title: brand } });
-    if (!brandRecord) {
-      brandRecord = await Brand.create({ title: brand });
-    }
-
     const existingProduct = await findExistingProduct(
       productCode,
       brandRecord.id,
@@ -909,15 +1147,19 @@ const processSingleProduct = async (
       };
     }
 
+    const existingHasStoredImages = existingProduct
+      ? await productHasStoredImages(existingProduct)
+      : false;
+
     const ImageUrl = response.data.data?.Image;
     let mainImageFilename = null;
 
-    if (ImageUrl) {
+    if (ImageUrl && !existingHasStoredImages) {
       mainImageFilename = await downloadMainImageWithFallback(
         ImageUrl,
         productCode
       );
-    } else {
+    } else if (!ImageUrl) {
       console.log(`⚠️ No main image data available for ${productCode}`);
     }
 
@@ -927,36 +1169,96 @@ const processSingleProduct = async (
       sku: productCode,
       mfr: productCode,
       techPartNo: null,
-      shortDescp: generalInfo?.Title || null,
-      longDescp: generalInfo?.Description?.LongDesc || null,
-      metaTitle: generalInfo?.Title || null,
-      metaDescp: generalInfo?.Description?.LongDesc || null,
-      upcCode: upc || "Null",
+      // For products that already have images stored, only fill missing text fields (don’t overwrite).
+      shortDescp:
+        existingHasStoredImages &&
+        existingProduct?.shortDescp &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.shortDescp
+          : generalInfo?.Title || existingProduct?.shortDescp || null,
+      longDescp:
+        existingHasStoredImages &&
+        existingProduct?.longDescp &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.longDescp
+          : generalInfo?.Description?.LongDesc || existingProduct?.longDescp || null,
+      longSummaryDescription:
+        existingHasStoredImages &&
+        existingProduct?.longSummaryDescription &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.longSummaryDescription
+          : generalInfo?.SummaryDescription?.LongSummaryDescription ||
+            generalInfo?.SummaryDescription?.Value ||
+            existingProduct?.longSummaryDescription ||
+            null,
+      metaTitle:
+        existingHasStoredImages &&
+        existingProduct?.metaTitle &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.metaTitle
+          : generalInfo?.Title || existingProduct?.metaTitle || null,
+      metaDescp:
+        existingHasStoredImages &&
+        existingProduct?.metaDescp &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.metaDescp
+          : generalInfo?.Description?.LongDesc || existingProduct?.metaDescp || null,
+      upcCode:
+        existingHasStoredImages && existingProduct?.upcCode
+          ? existingProduct.upcCode
+          : upc || "Null",
       productSource: "icecat",
       userId: 1,
-      mainImage: mainImageFilename || null,
-      title: generalInfo?.ProductName || generalInfo?.Title || productCode,
+      // Do not overwrite already-stored images
+      mainImage: existingHasStoredImages
+        ? existingProduct?.mainImage || null
+        : mainImageFilename || null,
+      title:
+        existingHasStoredImages &&
+        existingProduct?.title &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.title
+          : generalInfo?.ProductName ||
+            generalInfo?.Title ||
+            existingProduct?.title ||
+            productCode,
       price: price || 0.0,
       quantity: quantity || 0,
       brandId: brandRecord.id,
       categoryId: category.id,
       subCategoryId: subCategory.id,
-      bulletsPoint: Array.isArray(generalInfo?.GeneratedBulletPoints?.Values)
-        ? generalInfo.GeneratedBulletPoints.Values
-        : [],
+      bulletsPoint:
+        existingHasStoredImages &&
+        Array.isArray(existingProduct?.bulletsPoint) &&
+        existingProduct.bulletsPoint.length > 0
+          ? existingProduct.bulletsPoint
+          : Array.isArray(generalInfo?.GeneratedBulletPoints?.Values)
+          ? generalInfo.GeneratedBulletPoints.Values
+          : [],
     };
 
     let product;
     if (existingProduct) {
-      await cleanupProductAssets(existingProduct.id);
+      // Only cleanup assets if we are going to re-download images (no stored images yet).
+      if (!existingHasStoredImages) {
+        await cleanupProductAssets(existingProduct.id);
+      }
       await Product.update(productDataToCreate, {
         where: { id: existingProduct.id },
       });
       product = await Product.findByPk(existingProduct.id);
       console.log(`🔄 Updated existing product: ${product.title}`);
     } else {
-      product = await Product.create(productDataToCreate);
-      console.log(`🆕 Created new product: ${product.title}`);
+      // Re-check before create to avoid duplicate (e.g. concurrent run or race)
+      const duplicate = await Product.findOne({ where: productBySkuBrandWhere });
+      if (duplicate) {
+        await Product.update(productDataToCreate, { where: { id: duplicate.id } });
+        product = await Product.findByPk(duplicate.id);
+        console.log(`🔄 Updated existing product (avoided duplicate): ${product.title}`);
+      } else {
+        product = await Product.create(productDataToCreate);
+        console.log(`🆕 Created new product: ${product.title}`);
+      }
     }
 
     if (importProduct) {
@@ -970,7 +1272,10 @@ const processSingleProduct = async (
       );
     }
 
-    await processAdditionalProductData(response.data, product.id, productCode);
+    await processAdditionalProductData(response.data, product.id, productCode, {
+      // If images already exist, do not re-download gallery images again
+      skipGallery: existingHasStoredImages,
+    });
 
     if (jobId) {
       await ProductImportItem.create({
@@ -1330,7 +1635,8 @@ exports.importFromProductForImport = async (req, res) => {
           const result = await processSingleProduct(
             productData,
             importJob.id,
-            importProduct
+            importProduct,
+            { onlyStoreOnIcecatMatch: true }
           );
 
           console.log(`📊 Result for ${importProduct.sku}:`, result);
@@ -1411,9 +1717,7 @@ exports.importFromProductForImport = async (req, res) => {
     const finalStatus =
       results.failed.length === productsToImport.length
         ? "failed"
-        : results.successful.length > 0
-        ? "completed"
-        : "partial";
+        : "completed";
 
     await importJob.update({ status: finalStatus, completedAt: new Date() });
 
@@ -1498,6 +1802,49 @@ exports.importProduct = async (req, res) => {
       where: { sku: productCode, brand: brand },
     });
 
+    // Ensure brand exists early so we can check DB before calling Icecat
+    let brandRecord = await Brand.findOne({ where: { title: brand } });
+    if (!brandRecord) brandRecord = await Brand.create({ title: brand });
+
+    // If already cached (images + Icecat description), skip Icecat call
+    const existingBySkuBrand = await Product.findOne({
+      where: { sku: productCode, brandId: brandRecord.id },
+    });
+    if (existingBySkuBrand) {
+      const hasImages = await productHasStoredImages(existingBySkuBrand);
+      const hasDescription =
+        (existingBySkuBrand.shortDescp &&
+          String(existingBySkuBrand.shortDescp).trim() !== "") ||
+        (existingBySkuBrand.longDescp &&
+          String(existingBySkuBrand.longDescp).trim() !== "");
+      const hasIcecatCached =
+        existingBySkuBrand.productSource === "icecat" && hasDescription;
+
+      if (hasImages && hasDescription && (!ICECAT_OVERWRITE_DESCRIPTION || hasIcecatCached)) {
+        if (importProduct) {
+          await importProduct.update({
+            status: "active",
+            lastUpdated: new Date(),
+            mainProductId: existingBySkuBrand.id,
+            errorMessage: null,
+          });
+        }
+
+        return res.status(200).json({
+          message: "Already cached (images + description). Skipped Icecat call.",
+          action: "skipped",
+          product: {
+            id: existingBySkuBrand.id,
+            title: existingBySkuBrand.title,
+            sku: existingBySkuBrand.sku,
+            upc: existingBySkuBrand.upcCode,
+            brand: brandRecord.title,
+            existingProductUpdated: false,
+          },
+        });
+      }
+    }
+
     const response = await callIcecatAPIWithRetry(productCode, brand, 3);
 
     if (response.status === 404) {
@@ -1526,8 +1873,6 @@ exports.importProduct = async (req, res) => {
     }
 
     const upc = extractUPC(response.data);
-    let brandRecord = await Brand.findOne({ where: { title: brand } });
-    if (!brandRecord) brandRecord = await Brand.create({ title: brand });
 
     const existingProduct = await findExistingProduct(
       productCode,
@@ -1541,12 +1886,16 @@ exports.importProduct = async (req, res) => {
     const ImageUrl = response.data.data?.Image;
     let mainImageFilename = null;
 
-    if (ImageUrl) {
+    const existingHasStoredImages = existingProduct
+      ? await productHasStoredImages(existingProduct)
+      : false;
+
+    if (ImageUrl && !existingHasStoredImages) {
       mainImageFilename = await downloadMainImageWithFallback(
         ImageUrl,
         productCode
       );
-    } else {
+    } else if (!ImageUrl) {
       console.log(`⚠️ No main image data available for ${productCode}`);
     }
 
@@ -1575,15 +1924,54 @@ exports.importProduct = async (req, res) => {
       sku: productCode,
       mfr: productCode,
       techPartNo: null,
-      shortDescp: generalInfo?.Title || null,
-      longDescp: generalInfo?.Description?.LongDesc || null,
-      metaTitle: generalInfo?.Title || null,
-      metaDescp: generalInfo?.Description?.LongDesc || null,
+      shortDescp:
+        existingHasStoredImages &&
+        existingProduct?.shortDescp &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.shortDescp
+          : generalInfo?.Title || existingProduct?.shortDescp || null,
+      longDescp:
+        existingHasStoredImages &&
+        existingProduct?.longDescp &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.longDescp
+          : generalInfo?.Description?.LongDesc || existingProduct?.longDescp || null,
+      longSummaryDescription:
+        existingHasStoredImages &&
+        existingProduct?.longSummaryDescription &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.longSummaryDescription
+          : generalInfo?.SummaryDescription?.LongSummaryDescription ||
+            generalInfo?.SummaryDescription?.Value ||
+            existingProduct?.longSummaryDescription ||
+            null,
+      metaTitle:
+        existingHasStoredImages &&
+        existingProduct?.metaTitle &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.metaTitle
+          : generalInfo?.Title || existingProduct?.metaTitle || null,
+      metaDescp:
+        existingHasStoredImages &&
+        existingProduct?.metaDescp &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.metaDescp
+          : generalInfo?.Description?.LongDesc || existingProduct?.metaDescp || null,
       upcCode: upc || "Null",
       productSource: "icecat",
       userId: 1,
-      mainImage: mainImageFilename || null,
-      title: generalInfo?.ProductName || generalInfo?.Title || productCode,
+      mainImage: existingHasStoredImages
+        ? existingProduct?.mainImage || null
+        : mainImageFilename || null,
+      title:
+        existingHasStoredImages &&
+        existingProduct?.title &&
+        !ICECAT_OVERWRITE_DESCRIPTION
+          ? existingProduct.title
+          : generalInfo?.ProductName ||
+            generalInfo?.Title ||
+            existingProduct?.title ||
+            productCode,
       price: req.body.price ? parseFloat(req.body.price) : 0.0,
       quantity: req.body.quantity ? parseInt(req.body.quantity) : 0,
       brandId: brandRecord.id,
@@ -1602,7 +1990,9 @@ exports.importProduct = async (req, res) => {
 
     if (existingProduct) {
       isUpdate = true;
-      await cleanupProductAssets(existingProduct.id);
+      if (!existingHasStoredImages) {
+        await cleanupProductAssets(existingProduct.id);
+      }
       product = await updateExistingProduct(
         existingProduct,
         productData,
@@ -1633,7 +2023,9 @@ exports.importProduct = async (req, res) => {
     if (generatedBulletPoints)
       await processBulletPoints(generatedBulletPoints, product.id);
 
-    await processAdditionalProductData(response.data, product.id, productCode);
+    await processAdditionalProductData(response.data, product.id, productCode, {
+      skipGallery: existingHasStoredImages,
+    });
 
     res.status(201).json({
       message: isUpdate
@@ -1758,6 +2150,8 @@ exports.bulkImportProducts = async (req, res) => {
         brand: product.brand.trim(),
         price: product.price ? parseFloat(product.price) : 0.0,
         quantity: product.quantity ? parseInt(product.quantity) : 0,
+        weight: product.weight != null ? parseFloat(product.weight) : null,
+        dimensions: product.dimensions ? String(product.dimensions).trim() || null : null,
         index: index,
       });
     }
@@ -1796,8 +2190,10 @@ exports.bulkImportProducts = async (req, res) => {
           );
 
           const result = await processSingleProduct(
-            { ...productData, index: globalIndex }, 
-            importJob.id
+            { ...productData, index: globalIndex },
+            importJob.id,
+            null,
+            { onlyStoreOnIcecatMatch: true }
           );
 
           // Update progress
@@ -1842,9 +2238,7 @@ exports.bulkImportProducts = async (req, res) => {
     const finalStatus =
       results.failed.length === validProducts.length
         ? "failed"
-        : results.successful.length > 0
-        ? "completed"
-        : "partial";
+        : "completed";
 
     await importJob.update({ status: finalStatus, completedAt: new Date() });
 
@@ -1881,6 +2275,313 @@ exports.bulkImportProducts = async (req, res) => {
   }
 };
 
+/**
+ * Auto-import from FTP cache: read SKU + brand from FTP cache, fetch from Icecat, create products.
+ * Can be called by cron or manually. Optional: skip products that already exist (sku + brand).
+ */
+exports.importFromFtpCache = async (req, res) => {
+  try {
+    if (!FtpProductCache) {
+      return res.status(500).json({
+        success: false,
+        error: "FtpProductCache model not available. Sync FTP cache first.",
+      });
+    }
+
+    const skipExisting = (req.query.skip_existing || "true").toLowerCase() === "true";
+    const totalProducts = await Product.count();
+    const minProductsTarget = 200;
+    // Until we have at least 200 products, import more per run (max 50); otherwise use limit from query
+    const limitFromQuery = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    const limit =
+      totalProducts < minProductsTarget
+        ? Math.min(50, minProductsTarget - totalProducts, 100)
+        : limitFromQuery;
+
+    // Build set of (brand|sku) already in products table – skip these (no duplicate products)
+    let existingSkuBrand = new Set();
+    if (skipExisting) {
+      const existingProducts = await Product.findAll({
+        attributes: ["sku"],
+        include: [{ model: Brand, as: "brand", attributes: ["title"], required: true }],
+      });
+      existingProducts.forEach((p) => {
+        const b = (p.brand?.title || "").trim().toLowerCase();
+        const s = (p.sku || "").trim().toLowerCase();
+        if (b && s) existingSkuBrand.add(`${b}|${s}`);
+      });
+      console.log(`📦 [FTP import] Existing products in DB: ${existingSkuBrand.size}`);
+    }
+
+    // Also skip (brand|sku) already tried in any import job (Icecat/FTP) – success or failed – so we don't re-try same SKUs
+    let alreadyAttemptedSkuBrand = new Set();
+    const attemptedItems = await ProductImportItem.findAll({
+      attributes: ["productCode", "brand"],
+      raw: true,
+    });
+    attemptedItems.forEach((item) => {
+      const b = (item.brand || "").trim().toLowerCase();
+      const s = (item.productCode || "").trim().toLowerCase();
+      if (b && s) alreadyAttemptedSkuBrand.add(`${b}|${s}`);
+    });
+    console.log(`📦 [FTP import] Already attempted in import jobs: ${alreadyAttemptedSkuBrand.size}`);
+
+    // Scan FTP cache – newest first (id DESC) so we only pick new SKUs; old/purane SKUs are skipped (already in DB or already attempted).
+    const rows = await FtpProductCache.findAll({
+      order: [["id", "DESC"]],
+    });
+    console.log(`📦 [FTP import] FTP cache total rows: ${rows.length}`);
+
+    const validProducts = [];
+    const seen = new Set();
+    let skippedExisting = 0;
+    let skippedAlreadyAttempted = 0;
+
+    for (let i = 0; i < rows.length && validProducts.length < limit; i++) {
+      const r = rows[i];
+      const productCode = (r.mfrSku || r.internalSku || "").trim();
+      const brand = (r.vendorName || "").trim();
+      if (!productCode || !brand) continue;
+
+      const keyLower = `${brand.toLowerCase()}|${productCode.toLowerCase()}`;
+      if (seen.has(keyLower)) continue;
+      seen.add(keyLower);
+      if (skipExisting && existingSkuBrand.has(keyLower)) {
+        skippedExisting++;
+        continue;
+      }
+      if (alreadyAttemptedSkuBrand.has(keyLower)) {
+        skippedAlreadyAttempted++;
+        continue; // already tried in Icecat/FTP import – don't select again
+      }
+
+      validProducts.push({
+        productCode,
+        brand,
+        price: r.msrp ? parseFloat(r.msrp) : 0,
+        quantity: r.stock ? parseInt(r.stock, 10) : 0,
+        weight: r.weight != null ? parseFloat(r.weight) : null,
+        dimensions: r.dimensions ? String(r.dimensions).trim() || null : null,
+        index: validProducts.length,
+      });
+    }
+
+    console.log(`📦 [FTP import] Skipped (in DB): ${skippedExisting}, skipped (already tried in Icecat/FTP): ${skippedAlreadyAttempted}, New to import: ${validProducts.length}`);
+
+    if (validProducts.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: `No new products to import. FTP cache: ${rows.length} rows, already in DB: ${skippedExisting}. Sync more from FTP Catalog if needed.`,
+        jobId: null,
+        results: { total: 0, successful: 0, failed: 0, skipped: 0 },
+      });
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const todayImports = await ProductImportJob.count({
+      where: { createdAt: { [Op.gte]: today, [Op.lt]: tomorrow } },
+    });
+    if (todayImports + validProducts.length > 300) {
+      return res.status(400).json({
+        error: `Daily import limit exceeded. Today's remaining quota: ${300 - todayImports} products`,
+      });
+    }
+
+    const importJob = await ProductImportJob.create({
+      totalProducts: validProducts.length,
+      processedProducts: 0,
+      successfulImports: 0,
+      failedImports: 0,
+      status: "processing",
+      progress: 0,
+    });
+
+    const results = { successful: [], failed: [], skipped: [] };
+    // One product at a time, with delay between each – gentle on Icecat API
+    const concurrencyLimit = 1;
+    const delayBetweenProductsMs = 2500;
+
+    for (let i = 0; i < validProducts.length; i += concurrencyLimit) {
+      const batch = validProducts.slice(i, i + concurrencyLimit);
+      const batchPromises = batch.map(async (productData, batchIndex) => {
+        const globalIndex = i + batchIndex;
+        try {
+          const result = await processSingleProduct(
+            { ...productData, index: globalIndex },
+            importJob.id,
+            null,
+            { onlyStoreOnIcecatMatch: true }
+          );
+          return result;
+        } catch (err) {
+          console.error(`❌ FTP auto-import ${productData.productCode}:`, err.message);
+          return { status: "failed", productCode: productData.productCode, brand: productData.brand, error: err.message };
+        }
+      });
+      const batchResults = await Promise.all(batchPromises);
+      const failedItemCreates = [];
+      batchResults.forEach((r, idx) => {
+        const orderIndex = i + idx;
+        if (r.status === "success") results.successful.push(r);
+        else if (r.status === "skipped") results.skipped.push(r);
+        else {
+          results.failed.push(r);
+          // Record failed attempt so next cron run we skip this SKU and pick NEW SKUs (product count can grow)
+          failedItemCreates.push(
+            ProductImportItem.create({
+              jobId: importJob.id,
+              productCode: r.productCode,
+              brand: r.brand,
+              status: "failed",
+              errorMessage: (r.error || "").slice(0, 500),
+              orderIndex,
+            }).catch((err) => console.error("ProductImportItem create for failed:", err.message))
+          );
+        }
+      });
+      await Promise.all(failedItemCreates);
+      await importJob.update({
+        processedProducts: Math.min(i + concurrencyLimit, validProducts.length),
+        successfulImports: results.successful.length,
+        failedImports: results.failed.length,
+        progress: Math.round(((i + batch.length) / validProducts.length) * 100),
+      });
+      if (i + concurrencyLimit < validProducts.length) {
+        await new Promise((resolve) => setTimeout(resolve, delayBetweenProductsMs));
+      }
+    }
+
+    const finalStatus = results.failed.length === validProducts.length ? "failed" : "completed";
+    await importJob.update({ status: finalStatus, completedAt: new Date() });
+
+    console.log(
+      `🎉 FTP cache auto-import completed: ${results.successful.length} successful, ${results.failed.length} failed, ${results.skipped.length} skipped`
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `FTP cache import completed: ${results.successful.length} successful, ${results.failed.length} failed, ${results.skipped.length} skipped`,
+      jobId: importJob.id,
+      results: {
+        total: validProducts.length,
+        successful: results.successful.length,
+        failed: results.failed.length,
+        skipped: results.skipped.length,
+      },
+      importJob: { id: importJob.id, status: importJob.status, progress: importJob.progress },
+    });
+  } catch (error) {
+    console.error("❌ Error in importFromFtpCache:", error);
+    res
+      .status(500)
+      .json({ error: error.message || "Failed to import from FTP cache" });
+  }
+};
+
+/**
+ * Direct sync: vCloudTech FTP API → Icecat. Only store in DB when both match.
+ * No FTP cache write; no minimal product on Icecat 404.
+ * POST body: { page, per_page, distributor?, max_pages? }
+ */
+exports.syncVcloudtechToIcecat = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.body?.page, 10) || 1, 1);
+    const perPage = Math.min(Math.max(parseInt(req.body?.per_page, 10) || 50, 1), 100);
+    const maxPages = Math.min(Math.max(parseInt(req.body?.max_pages, 10) || 1, 1), 20);
+    const distributor = req.body?.distributor || undefined;
+
+    const summary = { fetched: 0, matched: 0, failed: 0, skipped: 0, errors: [] };
+    const delayBetweenProductsMs = 2500;
+
+    for (let p = 0; p < maxPages; p++) {
+      const currentPage = page + p;
+      const result = await ftpProductsApiService.getProducts({
+        page: currentPage,
+        per_page: perPage,
+        distributor,
+        include_icecat: false,
+      });
+      const items = result.data || [];
+      summary.fetched += items.length;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const productCode = (item.mfr_sku || item.internal_sku || "").trim();
+        const brand = (item.vendor_name || "").trim();
+        if (!productCode || !brand) continue;
+
+        // Skip if already in DB (SKU + brand). When cron restarts we don't re-process from start.
+        const alreadyExists = await productExistsBySkuAndBrandName(productCode, brand);
+        if (alreadyExists) {
+          summary.skipped += 1;
+          continue;
+        }
+
+        const productData = {
+          productCode,
+          brand,
+          price: item.msrp != null ? parseFloat(item.msrp) : 0,
+          quantity: item.stock != null ? parseInt(item.stock, 10) : 0,
+          weight: item.weight != null ? parseFloat(item.weight) : null,
+          dimensions: item.dimensions ? String(item.dimensions).trim() || null : null,
+          index: summary.fetched - items.length + i,
+        };
+
+        try {
+          const r = await processSingleProduct(productData, null, null, { onlyStoreOnIcecatMatch: true });
+          if (r.status === "success" || r.status === "skipped") summary.matched += 1;
+          else {
+            summary.failed += 1;
+            if (summary.errors.length < 50) summary.errors.push({ sku: productCode, brand, error: r.error || "unknown" });
+          }
+        } catch (err) {
+          summary.failed += 1;
+          if (summary.errors.length < 50) summary.errors.push({ sku: productCode, brand, error: err.message });
+        }
+
+        if (i < items.length - 1) await new Promise((resolve) => setTimeout(resolve, delayBetweenProductsMs));
+      }
+
+      if (items.length < perPage) break;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Direct sync (vCloudTech → Icecat): only matched products stored in DB.",
+      summary: {
+        fetched: summary.fetched,
+        matched: summary.matched,
+        failed: summary.failed,
+        skipped: summary.skipped,
+      },
+      errors: summary.errors.length ? summary.errors : undefined,
+    });
+  } catch (error) {
+    console.error("syncVcloudtechToIcecat error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Direct sync failed",
+    });
+  }
+};
+
+exports.getRecentImportJobs = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+    const jobs = await ProductImportJob.findAll({
+      order: [["createdAt", "DESC"]],
+      limit,
+    });
+    res.json({ success: true, data: jobs });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ error: error.message || "Failed to fetch recent import jobs" });
+  }
+};
 
 exports.getBulkImportStatus = async (req, res) => {
   try {
@@ -1901,6 +2602,77 @@ exports.getBulkImportStatus = async (req, res) => {
     res
       .status(500)
       .json({ error: error.message || "Failed to fetch bulk import status" });
+  }
+};
+
+/**
+ * Generate Excel: one sheet = Matched (SKU + Brand that matched/imported), other sheet = Unmatched (SKU + Brand that did not match).
+ * Query: jobId (optional) – default latest job.
+ */
+exports.exportImportJobExcel = async (req, res) => {
+  try {
+    let job;
+    if (req.query.jobId) {
+      job = await ProductImportJob.findByPk(req.query.jobId, {
+        include: [
+          { model: ProductImportItem, as: "items", order: [["orderIndex", "ASC"]] },
+        ],
+      });
+    } else {
+      job = await ProductImportJob.findOne({
+        order: [["createdAt", "DESC"]],
+        include: [
+          { model: ProductImportItem, as: "items", order: [["orderIndex", "ASC"]] },
+        ],
+      });
+    }
+    if (!job || !job.items || job.items.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "No import job or no items found. Run an import first.",
+      });
+    }
+
+    const matched = [];
+    const unmatched = [];
+    for (const item of job.items) {
+      const row = {
+        "Product Code": item.productCode,
+        Brand: item.brand,
+      };
+      if (item.status === "completed") {
+        row.Status = "Imported";
+        matched.push(row);
+      } else {
+        row.Status = "Not found / Failed";
+        row.Error = item.errorMessage || "—";
+        unmatched.push(row);
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    if (matched.length > 0) {
+      const wsMatched = XLSX.utils.json_to_sheet(matched);
+      XLSX.utils.book_append_sheet(wb, wsMatched, "Matched");
+    }
+    if (unmatched.length > 0) {
+      const wsUnmatched = XLSX.utils.json_to_sheet(unmatched);
+      XLSX.utils.book_append_sheet(wb, wsUnmatched, "Unmatched");
+    }
+    if (matched.length === 0 && unmatched.length === 0) {
+      return res.status(400).json({ success: false, error: "No items to export." });
+    }
+
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const filename = `import-report-job-${job.id}-${Date.now()}.xlsx`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(buf);
+  } catch (error) {
+    console.error("❌ exportImportJobExcel:", error);
+    res
+      .status(500)
+      .json({ error: error.message || "Failed to generate Excel" });
   }
 };
 
@@ -1936,6 +2708,304 @@ exports.getimportsProducts = async (req, res) => {
   }
 };
 
+// ===== ENRICH FROM ICECAT (Cache images/description in DB) =====
+
+// Enrich a single product from Icecat.
+// Rules:
+// - If product already has images in DB, do NOT download/replace images.
+// - If product already has images + description, skip Icecat call entirely.
+exports.enrichProductFromIcecat = async (req, res) => {
+  try {
+    const productId = parseInt(req.params.id, 10);
+    if (!productId)
+      return res.status(400).json({ error: "Invalid product ID" });
+
+    const product = await Product.findByPk(productId, {
+      include: [{ model: Brand, as: "brand" }],
+    });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    const brandName = product.brand?.title;
+    if (!product.sku || !brandName) {
+      return res.status(400).json({
+        error: "Product must have SKU and Brand to enrich from Icecat",
+      });
+    }
+
+    const overwriteDescription =
+      typeof req.query.overwriteDescription === "string"
+        ? ["true", "1", "yes"].includes(req.query.overwriteDescription.toLowerCase())
+        : ICECAT_OVERWRITE_DESCRIPTION;
+
+    const hasImages = await productHasStoredImages(product);
+    const hasDescription =
+      (product.shortDescp && String(product.shortDescp).trim() !== "") ||
+      (product.longDescp && String(product.longDescp).trim() !== "");
+    const hasIcecatCached = product.productSource === "icecat" && hasDescription;
+
+    // If already cached, skip Icecat call (fast)
+    if (hasImages && hasDescription && (!overwriteDescription || hasIcecatCached)) {
+      return res.status(200).json({
+        success: true,
+        message: "Already cached (images + description). Skipped Icecat call.",
+        data: product,
+      });
+    }
+
+    const response = await callIcecatAPIWithRetry(product.sku, brandName, 3);
+
+    if (response.status === 404) {
+      return res.status(404).json({
+        error: "Product not found in Icecat database (404)",
+      });
+    }
+    if (response.status === 403 || response.status >= 500) {
+      return res.status(502).json({
+        error: `Icecat API error: ${response.status}`,
+      });
+    }
+    if (!response.data?.data || response.data.Error) {
+      return res.status(502).json({
+        error:
+          response.data?.Error?.description || "Invalid response from Icecat API",
+      });
+    }
+
+    const icecatData = response.data;
+    const generalInfo = icecatData.data?.GeneralInfo;
+    const ImageUrl = icecatData.data?.Image;
+
+    const isEmpty = (v) =>
+      v == null || (typeof v === "string" && v.trim() === "");
+
+    const updateData = {};
+
+    // Images: only download if we have no stored images
+    if (!hasImages && isEmpty(product.mainImage) && ImageUrl) {
+      const filename = await downloadMainImageWithFallback(ImageUrl, product.sku);
+      if (filename) updateData.mainImage = filename;
+    }
+
+    // Text fields: fill missing OR overwrite with Icecat (FTP descriptions are often weak)
+    if ((overwriteDescription || isEmpty(product.shortDescp)) && generalInfo?.Title)
+      updateData.shortDescp = generalInfo.Title;
+    if (
+      (overwriteDescription || isEmpty(product.longDescp)) &&
+      generalInfo?.Description?.LongDesc
+    )
+      updateData.longDescp = generalInfo.Description.LongDesc;
+    const longSummary =
+      generalInfo?.SummaryDescription?.LongSummaryDescription ||
+      generalInfo?.SummaryDescription?.Value;
+    if ((overwriteDescription || isEmpty(product.longSummaryDescription)) && longSummary)
+      updateData.longSummaryDescription = longSummary;
+    if ((overwriteDescription || isEmpty(product.metaTitle)) && generalInfo?.Title)
+      updateData.metaTitle = generalInfo.Title;
+    if (
+      (overwriteDescription || isEmpty(product.metaDescp)) &&
+      generalInfo?.Description?.LongDesc
+    )
+      updateData.metaDescp = generalInfo.Description.LongDesc;
+
+    if (isEmpty(product.upcCode)) {
+      const upc = extractUPC(icecatData);
+      if (upc) updateData.upcCode = upc;
+    }
+
+    if (
+      (!product.bulletsPoint ||
+        (Array.isArray(product.bulletsPoint) && product.bulletsPoint.length === 0)) &&
+      Array.isArray(generalInfo?.GeneratedBulletPoints?.Values)
+    ) {
+      updateData.bulletsPoint = generalInfo.GeneratedBulletPoints.Values;
+    }
+
+    if (isEmpty(product.title) && (generalInfo?.ProductName || generalInfo?.Title)) {
+      updateData.title = generalInfo.ProductName || generalInfo.Title;
+    }
+
+    // Mark as enriched from Icecat
+    updateData.productSource = "icecat";
+
+    if (Object.keys(updateData).length > 0) {
+      await Product.update(updateData, { where: { id: productId } });
+    }
+
+    // Save additional Icecat data (gallery, docs, tech specs).
+    // If images already exist, skip gallery downloads to keep it fast and non-destructive.
+    await processAdditionalProductData(icecatData, productId, product.sku, {
+      skipGallery: hasImages,
+    });
+
+    const updated = await Product.findByPk(productId, {
+      include: [
+        { model: Brand, as: "brand" },
+        { model: Category, as: "category" },
+        { model: SubCategory, as: "subCategory" },
+        { model: Image, as: "images" },
+        { model: Gallery, as: "galleries" },
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Enriched from Icecat and saved to DB",
+      data: updated,
+    });
+  } catch (err) {
+    console.error("Error in enrichProductFromIcecat:", err);
+    return res
+      .status(500)
+      .json({ error: err.message || "Failed to enrich product from Icecat" });
+  }
+};
+
+// Bulk enrich products from Icecat.
+// Only calls Icecat when product is missing images or description.
+exports.enrichBulkFromIcecat = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+    const overwriteDescription =
+      typeof req.query.overwriteDescription === "string"
+        ? ["true", "1", "yes"].includes(req.query.overwriteDescription.toLowerCase())
+        : ICECAT_OVERWRITE_DESCRIPTION;
+
+    const products = await Product.findAll({
+      where: {
+        [Op.or]: [
+          { productSource: "external_api" },
+          { mainImage: { [Op.is]: null } },
+          { shortDescp: { [Op.is]: null } },
+          { longDescp: { [Op.is]: null } },
+        ],
+      },
+      include: [{ model: Brand, as: "brand" }],
+      limit,
+      order: [["id", "DESC"]],
+    });
+
+    const results = {
+      processed: 0,
+      enriched: 0,
+      skippedCached: 0,
+      notFound: 0,
+      errors: [],
+    };
+
+    for (const product of products) {
+      results.processed++;
+
+      const brandName = product.brand?.title;
+      if (!product.sku || !brandName) {
+        results.errors.push({
+          productId: product.id,
+          sku: product.sku,
+          reason: "Missing SKU or brand",
+        });
+        continue;
+      }
+
+      const hasImages = await productHasStoredImages(product);
+      const hasDescription =
+        (product.shortDescp && String(product.shortDescp).trim() !== "") ||
+        (product.longDescp && String(product.longDescp).trim() !== "");
+      const hasIcecatCached = product.productSource === "icecat" && hasDescription;
+
+      if (hasImages && hasDescription && (!overwriteDescription || hasIcecatCached)) {
+        results.skippedCached++;
+        continue;
+      }
+
+      try {
+        const response = await callIcecatAPIWithRetry(product.sku, brandName, 2);
+
+        if (response.status === 404) {
+          results.notFound++;
+          continue;
+        }
+        if (!response.data?.data || response.data.Error) continue;
+
+        const icecatData = response.data;
+        const generalInfo = icecatData.data?.GeneralInfo;
+        const ImageUrl = icecatData.data?.Image;
+
+        const isEmpty = (v) =>
+          v == null || (typeof v === "string" && v.trim() === "");
+
+        const updateData = {};
+
+        if (!hasImages && isEmpty(product.mainImage) && ImageUrl) {
+          const filename = await downloadMainImageWithFallback(ImageUrl, product.sku);
+          if (filename) updateData.mainImage = filename;
+        }
+
+        if ((overwriteDescription || isEmpty(product.shortDescp)) && generalInfo?.Title)
+          updateData.shortDescp = generalInfo.Title;
+        if (
+          (overwriteDescription || isEmpty(product.longDescp)) &&
+          generalInfo?.Description?.LongDesc
+        )
+          updateData.longDescp = generalInfo.Description.LongDesc;
+        const longSummaryBulk =
+          generalInfo?.SummaryDescription?.LongSummaryDescription ||
+          generalInfo?.SummaryDescription?.Value;
+        if ((overwriteDescription || isEmpty(product.longSummaryDescription)) && longSummaryBulk)
+          updateData.longSummaryDescription = longSummaryBulk;
+        if ((overwriteDescription || isEmpty(product.metaTitle)) && generalInfo?.Title)
+          updateData.metaTitle = generalInfo.Title;
+        if (
+          (overwriteDescription || isEmpty(product.metaDescp)) &&
+          generalInfo?.Description?.LongDesc
+        )
+          updateData.metaDescp = generalInfo.Description.LongDesc;
+
+        if (isEmpty(product.upcCode)) {
+          const upc = extractUPC(icecatData);
+          if (upc) updateData.upcCode = upc;
+        }
+
+        if (
+          (!product.bulletsPoint ||
+            (Array.isArray(product.bulletsPoint) && product.bulletsPoint.length === 0)) &&
+          Array.isArray(generalInfo?.GeneratedBulletPoints?.Values)
+        ) {
+          updateData.bulletsPoint = generalInfo.GeneratedBulletPoints.Values;
+        }
+
+        if (isEmpty(product.title) && (generalInfo?.ProductName || generalInfo?.Title)) {
+          updateData.title = generalInfo.ProductName || generalInfo.Title;
+        }
+
+        updateData.productSource = "icecat";
+
+        if (Object.keys(updateData).length > 0) {
+          await Product.update(updateData, { where: { id: product.id } });
+          await processAdditionalProductData(icecatData, product.id, product.sku, {
+            skipGallery: hasImages,
+          });
+          results.enriched++;
+        }
+      } catch (e) {
+        results.errors.push({ productId: product.id, sku: product.sku, reason: e.message });
+      }
+
+      // small delay to avoid rate limits
+      await delay(300);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Bulk enrich done: ${results.enriched} enriched, ${results.skippedCached} skipped cached, ${results.notFound} not in Icecat`,
+      data: results,
+    });
+  } catch (err) {
+    console.error("Error in enrichBulkFromIcecat:", err);
+    return res
+      .status(500)
+      .json({ error: err.message || "Failed to bulk enrich from Icecat" });
+  }
+};
+
 exports.createProduct = async (req, res) => {
   try {
     console.log("Request body:", req.body);
@@ -1947,6 +3017,9 @@ exports.createProduct = async (req, res) => {
       techPartNo: req.body.techPartNo || null,
       shortDescp: req.body.shortDescp || null,
       longDescp: req.body.longDescp || null,
+      longSummaryDescription: req.body.longSummaryDescription || null,
+      weight: req.body.weight != null ? parseFloat(req.body.weight) : null,
+      dimensions: req.body.dimensions || null,
       metaTitle: req.body.metaTitle || null,
       metaDescp: req.body.metaDescp || null,
       upcCode: req.body.upcCode || null,
@@ -2006,9 +3079,28 @@ exports.createProduct = async (req, res) => {
   }
 };
 
+/** GET /count – total products (optional: matched_only, per_page for pages). */
+exports.getProductsCount = async (req, res) => {
+  try {
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    const where = onlyMatched ? { productSource: "icecat" } : {};
+    const total = await Product.count({ where });
+    const perPage = Math.max(parseInt(req.query.per_page, 10) || 50, 1);
+    const pages = Math.max(Math.ceil(total / perPage), 1);
+    return res.json({ success: true, total, pages, per_page: perPage });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
 exports.getProducts = async (req, res) => {
   try {
+    // Only show products that actually matched in Icecat (FTP + Icecat). Hide external_api (404 minimal), manual, other.
+    const onlyMatched = (req.query.matched_only ?? req.query.matched ?? "true").toString().toLowerCase() !== "false";
+    const where = onlyMatched ? { productSource: "icecat" } : {};
+
     const products = await Product.findAll({
+      where,
       include: [
         { model: Brand, as: "brand" },
         { model: Category, as: "category" },
@@ -2017,7 +3109,38 @@ exports.getProducts = async (req, res) => {
         { model: Gallery, as: "galleries" },
       ],
     });
-    res.json(products);
+
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+    const toUploadUrl = (filename) => {
+      if (!filename) return null;
+      const f = String(filename).trim();
+      if (!f) return null;
+      if (/^https?:\/\//i.test(f)) return f;
+      // Use /uploads/<filename> (server fallback handles /uploads/products too)
+      return `${baseUrl}/uploads/${encodeURIComponent(f)}`;
+    };
+
+    const out = products.map((p) => {
+      const j = typeof p.toJSON === "function" ? p.toJSON() : p;
+      const brandTitle = j?.brand?.title || null;
+      return {
+        ...j,
+        // brand compatibility for older frontends
+        brandTitle,
+        brandName: brandTitle,
+        // image URLs (absolute)
+        mainImageUrl: toUploadUrl(j.mainImage),
+        imageUrls: Array.isArray(j.images)
+          ? j.images.map((im) => toUploadUrl(im.url)).filter(Boolean)
+          : [],
+        galleryUrls: Array.isArray(j.galleries)
+          ? j.galleries.map((g) => toUploadUrl(g.url)).filter(Boolean)
+          : [],
+      };
+    });
+
+    res.json(out);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2047,7 +3170,31 @@ exports.getProduct = async (req, res) => {
       ],
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
-    res.json(product);
+
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+    const toUploadUrl = (filename) => {
+      if (!filename) return null;
+      const f = String(filename).trim();
+      if (!f) return null;
+      if (/^https?:\/\//i.test(f)) return f;
+      return `${baseUrl}/uploads/${encodeURIComponent(f)}`;
+    };
+
+    const j = typeof product.toJSON === "function" ? product.toJSON() : product;
+    const brandTitle = j?.brand?.title || null;
+    return res.json({
+      ...j,
+      brandTitle,
+      brandName: brandTitle,
+      mainImageUrl: toUploadUrl(j.mainImage),
+      imageUrls: Array.isArray(j.images)
+        ? j.images.map((im) => toUploadUrl(im.url)).filter(Boolean)
+        : [],
+      galleryUrls: Array.isArray(j.galleries)
+        ? j.galleries.map((g) => toUploadUrl(g.url)).filter(Boolean)
+        : [],
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2172,6 +3319,9 @@ exports.advancedSearch = async (req, res) => {
     if (inStock === "true") whereClause.quantity = { [Op.gt]: 0 };
     else if (inStock === "false") whereClause.quantity = { [Op.eq]: 0 };
 
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    if (onlyMatched) whereClause.productSource = "icecat";
+
     const offset = (page - 1) * limit;
 
     const { count, rows: products } = await Product.findAndCountAll({
@@ -2219,15 +3369,22 @@ exports.searchProducts = async (req, res) => {
         .json({ success: false, error: "Search query is required" });
 
     const offset = (page - 1) * limit;
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    const where = {
+      [Op.and]: [
+        {
+          [Op.or]: [
+            { title: { [Op.iLike]: `%${q}%` } },
+            { sku: { [Op.iLike]: `%${q}%` } },
+            { shortDescp: { [Op.iLike]: `%${q}%` } },
+          ],
+        },
+        ...(onlyMatched ? [{ productSource: "icecat" }] : []),
+      ],
+    };
 
     const { count, rows: products } = await Product.findAndCountAll({
-      where: {
-        [Op.or]: [
-          { title: { [Op.iLike]: `%${q}%` } },
-          { sku: { [Op.iLike]: `%${q}%` } },
-          { shortDescp: { [Op.iLike]: `%${q}%` } },
-        ],
-      },
+      where,
       include: [{ model: Brand }],
       order: [["title", "ASC"]],
       limit: parseInt(limit),
@@ -2308,6 +3465,9 @@ exports.filterByCategory = async (req, res) => {
       whereClause.categoryId = category.id;
     }
 
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    if (onlyMatched) whereClause.productSource = "icecat";
+
     const offset = (page - 1) * limit;
 
     const { count, rows: products } = await Product.findAndCountAll({
@@ -2358,6 +3518,9 @@ exports.filterByManufacturer = async (req, res) => {
         .json({ success: false, error: "Manufacturer (mfr) is required" });
 
     const whereClause = { mfr: { [Op.iLike]: `%${mfr}%` } };
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    if (onlyMatched) whereClause.productSource = "icecat";
+
     const offset = (page - 1) * limit;
 
     const { count, rows: products } = await Product.findAndCountAll({
@@ -2417,6 +3580,9 @@ exports.filterByCategoryAndManufacturer = async (req, res) => {
           .json({ success: false, error: "Category not found" });
       whereClause.categoryId = category.id;
     }
+
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    if (onlyMatched) whereClause.productSource = "icecat";
 
     const offset = (page - 1) * limit;
 
@@ -2512,6 +3678,9 @@ exports.filterProducts = async (req, res) => {
         { mfr: { [Op.iLike]: `%${search}%` } },
       ];
     }
+
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    if (onlyMatched) whereClause.productSource = "icecat";
 
     const offset = (page - 1) * limit;
     const validSortFields = ["title", "price", "createdAt", "updatedAt", "mfr"];
@@ -2637,7 +3806,11 @@ exports.getProductsByTag = async (req, res) => {
       ? sortOrder.toUpperCase()
       : "ASC";
 
+    const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
+    const whereTag = onlyMatched ? { productSource: "icecat" } : {};
+
     const { count, rows: products } = await Product.findAndCountAll({
+      where: whereTag,
       include: [
         { model: Brand, as: "brand" },
         { model: Category, as: "category" },

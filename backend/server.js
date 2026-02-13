@@ -3,6 +3,8 @@ const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
+const cron = require("node-cron");
+const axios = require("axios");
 require("dotenv").config();
 
 // ✅ Import from config/db.js
@@ -292,6 +294,151 @@ app.get("/api/cron/trigger-import", async (req, res) => {
   }
 });
 
+// Manual trigger: import products from FTP cache (SKU + Brand → Icecat). GET so you can run from browser for testing.
+const runFtpImportTrigger = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    const base = `http://localhost:${process.env.PORT || 5051}`;
+    const axiosRes = await axios.post(
+      `${base}/api/products/import-from-ftp-cache?limit=${limit}&skip_existing=true`,
+      {},
+      { timeout: 600000 }
+    );
+    res.json(axiosRes.data);
+  } catch (error) {
+    console.error("❌ Trigger FTP import failed:", error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message || "FTP cache import failed",
+    });
+  }
+};
+app.get("/api/cron/trigger-ftp-import", runFtpImportTrigger);
+app.post("/api/cron/trigger-ftp-import", runFtpImportTrigger);
+
+// ---------- FTP cache fill: sync pages from vCloudTech API into DB cache (so cache grows toward full catalog) ----------
+const FTP_CACHE_SYNC_STATE_PATH = path.join(__dirname, "data", "ftp_cache_sync_page.json");
+
+const readFtpCacheSyncPage = () => {
+  try {
+    if (fs.existsSync(FTP_CACHE_SYNC_STATE_PATH)) {
+      const raw = fs.readFileSync(FTP_CACHE_SYNC_STATE_PATH, "utf8");
+      const o = JSON.parse(raw);
+      return Math.max(1, parseInt(o.page, 10) || 1);
+    }
+  } catch (e) {
+    console.warn("FTP cache sync state read failed:", e.message);
+  }
+  return 1;
+};
+
+const writeFtpCacheSyncPage = (page) => {
+  try {
+    const dir = path.dirname(FTP_CACHE_SYNC_STATE_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(FTP_CACHE_SYNC_STATE_PATH, JSON.stringify({ page: Math.max(1, page) }, null, 2));
+  } catch (e) {
+    console.warn("FTP cache sync state write failed:", e.message);
+  }
+};
+
+const runFtpCacheSyncTrigger = async (req, res) => {
+  try {
+    const page = parseInt(req.query?.page || req.body?.page, 10) || readFtpCacheSyncPage();
+    const maxPages = Math.min(Math.max(parseInt(req.query?.max_pages || req.body?.max_pages, 10) || 1, 1), 50);
+    const perPage = Math.min(Math.max(parseInt(req.query?.per_page || req.body?.per_page, 10) || 100, 1), 200);
+    const base = `http://localhost:${process.env.PORT || 5051}`;
+    let totalUpserted = 0;
+    let nextPage = page;
+    for (let i = 0; i < maxPages; i++) {
+      const p = nextPage;
+      const axiosRes = await axios.post(
+        `${base}/api/ftpproducts/cache/sync`,
+        { page: p, per_page: perPage, distributor: req.body?.distributor || req.query?.distributor },
+        { timeout: 120000 }
+      );
+      const upserted = axiosRes.data?.upserted ?? 0;
+      totalUpserted += upserted;
+      nextPage = p + 1;
+      if (upserted === 0) break;
+      if (i < maxPages - 1) await new Promise((r) => setTimeout(r, 200));
+    }
+    writeFtpCacheSyncPage(nextPage);
+    res.json({
+      success: true,
+      message: `FTP cache sync: ${totalUpserted} items upserted`,
+      pages_synced: nextPage - page,
+      next_sync_page: nextPage,
+      total_upserted: totalUpserted,
+    });
+  } catch (error) {
+    console.error("❌ FTP cache sync trigger failed:", error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message || "FTP cache sync failed",
+    });
+  }
+};
+app.get("/api/cron/trigger-ftp-cache-sync", runFtpCacheSyncTrigger);
+app.post("/api/cron/trigger-ftp-cache-sync", runFtpCacheSyncTrigger);
+
+// ---------- vCloudTech FTP catalog → Icecat: 1 page (50 products) per run, store only when both match; skip through 44k+ pages ----------
+const VCLOUDTECH_ICECAT_STATE_PATH = path.join(__dirname, "data", "vcloudtech_icecat_sync_page.json");
+const PER_PAGE_FTP_ICECAT = 50;
+
+const readVcloudtechIcecatPage = () => {
+  try {
+    if (fs.existsSync(VCLOUDTECH_ICECAT_STATE_PATH)) {
+      const raw = fs.readFileSync(VCLOUDTECH_ICECAT_STATE_PATH, "utf8");
+      const o = JSON.parse(raw);
+      return Math.max(1, parseInt(o.page, 10) || 1);
+    }
+  } catch (e) {
+    console.warn("vCloudTech Icecat sync state read failed:", e.message);
+  }
+  return 1;
+};
+
+const writeVcloudtechIcecatPage = (page) => {
+  try {
+    const dir = path.dirname(VCLOUDTECH_ICECAT_STATE_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(VCLOUDTECH_ICECAT_STATE_PATH, JSON.stringify({ page: Math.max(1, page) }, null, 2));
+  } catch (e) {
+    console.warn("vCloudTech Icecat sync state write failed:", e.message);
+  }
+};
+
+const runVcloudtechIcecatSync = async (req, res) => {
+  try {
+    const page = parseInt(req.query?.page || req.body?.page, 10) || readVcloudtechIcecatPage();
+    const maxPages = Math.min(Math.max(parseInt(req.query?.max_pages || req.body?.max_pages, 10) || 1, 1), 10);
+    const perPage = parseInt(req.query?.per_page || req.body?.per_page, 10) || PER_PAGE_FTP_ICECAT;
+    const base = `http://localhost:${process.env.PORT || 5051}`;
+    const axiosRes = await axios.post(
+      `${base}/api/products/sync-vcloudtech-to-icecat`,
+      { page, per_page: Math.min(perPage, 100), max_pages: maxPages, distributor: req.body?.distributor || req.query?.distributor },
+      { timeout: 600000 }
+    );
+    const data = axiosRes.data;
+    const fetched = data?.summary?.fetched ?? 0;
+    const matched = data?.summary?.matched ?? 0;
+    const nextPage = fetched === 0 ? 1 : page + maxPages;
+    writeVcloudtechIcecatPage(nextPage);
+    if (res) {
+      res.json({ ...data, next_sync_page: nextPage });
+    }
+    return { page, nextPage, fetched, matched };
+  } catch (error) {
+    console.error("❌ vCloudTech→Icecat sync failed:", error.message);
+    if (res) res.status(500).json({ success: false, error: error.message || "vCloudTech→Icecat sync failed" });
+    return null;
+  }
+};
+
+app.get("/api/cron/trigger-vcloudtech-icecat-sync", (req, res) => runVcloudtechIcecatSync(req, res));
+app.post("/api/cron/trigger-vcloudtech-icecat-sync", (req, res) => runVcloudtechIcecatSync(req, res));
+
 // Check cron job status
 app.get("/api/cron/status", (req, res) => {
   if (!cronInstance) {
@@ -367,7 +514,10 @@ app.get("/api/cron/jobs", async (req, res) => {
 });
 
 // --- Connect to Database and Start Server ---
-const PORT = process.env.PORT || 5000;
+// NOTE: On Windows + Cursor IDE, ports like 5000/5001 can be occupied by Cursor's internal NodeService
+// which causes browsers/curl to hit the wrong process and show ERR_EMPTY_RESPONSE.
+// Use 5051 by default; you can still override via PORT env var.
+const PORT = process.env.PORT || 5051;
 
 const startServer = async () => {
   try {
@@ -413,6 +563,103 @@ const startServer = async () => {
       console.log(
         `🔔 Manual Trigger: http://localhost:${PORT}/api/cron/trigger-import`
       );
+      console.log(
+        `📥 FTP cache fill: http://localhost:${PORT}/api/cron/trigger-ftp-cache-sync`
+      );
+      console.log(
+        `🔄 FTP→Icecat (50/page, 44k pages): http://localhost:${PORT}/api/cron/trigger-vcloudtech-icecat-sync`
+      );
+
+      // Run FTP cache import once after 15s on startup (for testing). Disable later via RUN_FTP_IMPORT_ON_STARTUP=false
+      const runFtpImportOnStartup = process.env.RUN_FTP_IMPORT_ON_STARTUP !== "false";
+      if (runFtpImportOnStartup) {
+        setTimeout(async () => {
+          try {
+            const base = `http://localhost:${PORT}`;
+            console.log("📥 [Testing] Running FTP cache import once...");
+            const res = await axios.post(
+              `${base}/api/products/import-from-ftp-cache?limit=30&skip_existing=true`,
+              {},
+              { timeout: 600000 }
+            );
+            console.log("✅ FTP cache import (startup) completed:", res.data?.message || res.data);
+          } catch (e) {
+            console.error("❌ FTP cache import (startup) failed:", e.message);
+          }
+        }, 15000);
+        console.log("📥 FTP cache import will run once in 15s (testing). Set RUN_FTP_IMPORT_ON_STARTUP=false to disable.");
+      }
+
+      // Auto-import from FTP cache every 10 min – only new SKUs (no duplicates)
+      const ftpCronSchedule = "*/10 * * * *";
+      cron.schedule(ftpCronSchedule, () => {
+        const run = async () => {
+          console.log("🕒 [Cron] FTP cache auto-import tick (every 10 min) – running...");
+          try {
+            const base = `http://localhost:${PORT}`;
+            const res = await axios.post(
+              `${base}/api/products/import-from-ftp-cache?limit=30&skip_existing=true`,
+              {},
+              { timeout: 600000 }
+            );
+            const msg = res.data?.message || res.data;
+            console.log("✅ [Cron] FTP cache auto-import completed:", msg);
+            if (res.data?.results?.total === 0 && String(msg || "").toLowerCase().includes("no new"))
+              console.log("ℹ️ [Cron] No new products to import this run (all skipped or already in DB/attempted). Next run in 10 min.");
+          } catch (e) {
+            console.error("❌ [Cron] FTP cache auto-import failed:", e.message);
+          }
+        };
+        run().catch((err) => console.error("❌ [Cron] FTP import run error:", err.message));
+      });
+      console.log("📥 FTP cache auto-import scheduled (" + ftpCronSchedule + "). Logs: 🕒 tick, ✅ completed, ❌ failed.");
+
+      // FTP cache fill: sync next page from vCloudTech API into DB so cache grows toward full catalog (2.2M+ products).
+      const ftpCacheCronSchedule = process.env.FTP_CACHE_SYNC_CRON_SCHEDULE || "*/10 * * * *";
+      if (ftpCacheCronSchedule) {
+        cron.schedule(ftpCacheCronSchedule, () => {
+          const run = async () => {
+            console.log("🕒 [Cron] FTP cache fill – syncing next page from vCloudTech API...");
+            try {
+              const page = readFtpCacheSyncPage();
+              const base = `http://localhost:${PORT}`;
+              const res = await axios.post(
+                `${base}/api/ftpproducts/cache/sync`,
+                { page, per_page: 100 },
+                { timeout: 120000 }
+              );
+              const upserted = res.data?.upserted ?? 0;
+              const nextPage = upserted === 0 ? 1 : page + 1;
+              writeFtpCacheSyncPage(nextPage);
+              console.log("✅ [Cron] FTP cache fill: page " + page + " → " + upserted + " items, next_page=" + nextPage);
+            } catch (e) {
+              console.error("❌ [Cron] FTP cache fill failed:", e.message);
+            }
+          };
+          run().catch((err) => console.error("❌ [Cron] FTP cache fill run error:", err.message));
+        });
+        console.log("📥 FTP cache fill cron (" + ftpCacheCronSchedule + "). Manual: GET/POST /api/cron/trigger-ftp-cache-sync");
+      }
+
+      // vCloudTech FTP catalog → Icecat: 1 page (50 products) per run; store only when both match; advance through 44k+ pages.
+      const vcloudtechIcecatSchedule = process.env.VCLOUDTECH_ICECAT_CRON_SCHEDULE || "*/10 * * * *";
+      if (vcloudtechIcecatSchedule) {
+        cron.schedule(vcloudtechIcecatSchedule, () => {
+          const run = async () => {
+            console.log("🕒 [Cron] FTP catalog→Icecat: fetching next page (50 products), matching Icecat, then next page...");
+            try {
+              const result = await runVcloudtechIcecatSync({}, null);
+              if (result) {
+                console.log("✅ [Cron] FTP→Icecat: page " + result.page + " → fetched=" + result.fetched + ", matched=" + result.matched + ", next_page=" + result.nextPage);
+              }
+            } catch (e) {
+              console.error("❌ [Cron] FTP→Icecat failed:", e.message);
+            }
+          };
+          run().catch((err) => console.error("❌ [Cron] FTP→Icecat run error:", err.message));
+        });
+        console.log("🔄 FTP→Icecat cron (" + vcloudtechIcecatSchedule + "): 50 products/page, store only when FTP+Icecat match. Manual: GET/POST /api/cron/trigger-vcloudtech-icecat-sync");
+      }
     });
   } catch (err) {
     console.error("❌ Failed to start server:", err.message);
