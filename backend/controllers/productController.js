@@ -3153,6 +3153,16 @@ exports.getProducts = async (req, res) => {
     const onlyMatched = (req.query.matched_only ?? req.query.matched ?? "true").toString().toLowerCase() !== "false";
     let where = onlyMatched ? { productSource: "icecat" } : {};
 
+    const categoryParam = req.query.categoryId ?? req.query.category ?? req.query.subcategoryId;
+    if (categoryParam != null && categoryParam !== "") {
+      const categoryWhere = await getCategoryFilterWhere(categoryParam);
+      if (categoryWhere) {
+        where = Object.keys(where).length
+          ? { [Op.and]: [where, categoryWhere] }
+          : categoryWhere;
+      }
+    }
+
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const offset = (page - 1) * limit;
@@ -3553,39 +3563,76 @@ const getCategoryIds = async (categoryNames) => {
   }
 };
 
+/**
+ * Unified category filter for a single id (category or subcategory).
+ * Use so that one param works for both:
+ * - Subcategory click (e.g. "Mice"): products with subCategoryId = id or categoryId = id.
+ * - Parent category click (e.g. "Electronics"): products with categoryId = id or subCategoryId in (children of category id).
+ * Returns a where condition: (subCategoryId = id OR categoryId = id OR subCategoryId IN (child subcategory ids)).
+ */
+const getCategoryFilterWhere = async (id) => {
+  const numId = parseInt(id, 10);
+  if (Number.isNaN(numId) || numId < 1) return null;
+  try {
+    const childSubs = await db.SubCategory.findAll({
+      where: { parentId: numId },
+      attributes: ["id"],
+    });
+    const childIds = childSubs.map((s) => s.id);
+    const orConditions = [
+      { subCategoryId: numId },
+      { categoryId: numId },
+    ];
+    if (childIds.length > 0) {
+      orConditions.push({ subCategoryId: { [Op.in]: childIds } });
+    }
+    return { [Op.or]: orConditions };
+  } catch (err) {
+    console.error("getCategoryFilterWhere error:", err.message);
+    return { [Op.or]: [{ subCategoryId: numId }, { categoryId: numId }] };
+  }
+};
+
 
 // ===== ENHANCED PRODUCT FILTERING =====
 
 // Filter products by category only
+// Supports single id param (categoryId, category, or subcategoryId): filter by (subCategoryId = id OR categoryId = id OR subCategoryId IN children of category).
 exports.filterByCategory = async (req, res) => {
   try {
-    const { categoryId, categoryName, page = 1, limit = 10 } = req.query;
-    if (!categoryId && !categoryName)
+    const { categoryId, categoryName, category, subcategoryId, page = 1, limit = 10 } = req.query;
+    const idParam = categoryId ?? category ?? subcategoryId;
+    if (!idParam && !categoryName)
       return res.status(400).json({
         success: false,
-        error: "Either categoryId or categoryName is required",
+        error: "Either categoryId/category/subcategoryId or categoryName is required",
       });
 
-    const whereClause = {};
-    if (categoryId) whereClause.categoryId = categoryId;
-    else if (categoryName) {
-      const category = await Category.findOne({
+    let whereClause = {};
+    if (idParam) {
+      const categoryFilterWhere = await getCategoryFilterWhere(idParam);
+      if (categoryFilterWhere) whereClause = categoryFilterWhere;
+      else whereClause.categoryId = parseInt(idParam, 10) || undefined;
+    } else if (categoryName) {
+      const categoryRecord = await Category.findOne({
         where: { title: { [Op.iLike]: `%${categoryName}%` } },
       });
-      if (!category)
+      if (!categoryRecord)
         return res
           .status(404)
           .json({ success: false, error: "Category not found" });
-      whereClause.categoryId = category.id;
+      const categoryFilterWhere = await getCategoryFilterWhere(categoryRecord.id);
+      whereClause = categoryFilterWhere || { categoryId: categoryRecord.id };
     }
 
     const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
     if (onlyMatched) whereClause.productSource = "icecat";
 
     const offset = (page - 1) * limit;
+    const fullWhere = Object.keys(whereClause).length ? whereClause : {};
 
     const { count, rows: products } = await Product.findAndCountAll({
-      where: whereClause,
+      where: fullWhere,
       include: [
         { model: Brand, as: "brand" },
         { model: Category, as: "category" },
@@ -3609,8 +3656,8 @@ exports.filterByCategory = async (req, res) => {
       },
       filter: {
         type: "category",
-        categoryId: whereClause.categoryId,
-        categoryName: categoryName || "ID provided",
+        categoryId: idParam || categoryName || "ID provided",
+        unified: true,
       },
     });
   } catch (error) {
@@ -3674,25 +3721,39 @@ exports.filterByManufacturer = async (req, res) => {
 // Filter products by both category and manufacturer
 exports.filterByCategoryAndManufacturer = async (req, res) => {
   try {
-    const { categoryId, categoryName, mfr, page = 1, limit = 10 } = req.query;
-    if ((!categoryId && !categoryName) || !mfr)
+    const { categoryId, categoryName, category, subcategoryId, mfr, page = 1, limit = 10 } = req.query;
+    const idParam = categoryId ?? category ?? subcategoryId;
+    if ((!idParam && !categoryName) || !mfr)
       return res.status(400).json({
         success: false,
         error:
-          "Both category (categoryId or categoryName) and manufacturer (mfr) are required",
+          "Both category (categoryId/category/subcategoryId or categoryName) and manufacturer (mfr) are required",
       });
 
     const whereClause = { mfr: { [Op.iLike]: `%${mfr}%` } };
-    if (categoryId) whereClause.categoryId = categoryId;
-    else if (categoryName) {
-      const category = await Category.findOne({
+    if (idParam) {
+      const categoryFilterWhere = await getCategoryFilterWhere(idParam);
+      if (categoryFilterWhere) {
+        whereClause[Op.and] = [{ mfr: whereClause.mfr }, categoryFilterWhere];
+        delete whereClause.mfr;
+      } else {
+        whereClause.categoryId = parseInt(idParam, 10) || undefined;
+      }
+    } else if (categoryName) {
+      const categoryRecord = await Category.findOne({
         where: { title: { [Op.iLike]: `%${categoryName}%` } },
       });
-      if (!category)
+      if (!categoryRecord)
         return res
           .status(404)
           .json({ success: false, error: "Category not found" });
-      whereClause.categoryId = category.id;
+      const categoryFilterWhere = await getCategoryFilterWhere(categoryRecord.id);
+      if (categoryFilterWhere) {
+        whereClause[Op.and] = [{ mfr: whereClause.mfr }, categoryFilterWhere];
+        delete whereClause.mfr;
+      } else {
+        whereClause.categoryId = categoryRecord.id;
+      }
     }
 
     const onlyMatched = (req.query.matched_only ?? "true").toString().toLowerCase() !== "false";
