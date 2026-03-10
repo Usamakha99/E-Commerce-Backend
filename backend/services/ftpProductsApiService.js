@@ -4,13 +4,15 @@
  * Icecat enriches images/description when missing.
  */
 const axios = require("axios");
-require("dotenv").config();
+const path = require("path");
+// Load .env from backend directory (parent of services/) so FTP_API_* are available
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 // FTP API base URL – set in .env as FTP_API_BASE_URL, or change default here
 const FTP_API_BASE_URL =
   process.env.FTP_API_BASE_URL || "https://test.vcloudtech.net/api";
-const FTP_API_EMAIL = process.env.FTP_API_EMAIL || "";
-const FTP_API_PASSWORD = process.env.FTP_API_PASSWORD || "";
+const FTP_API_EMAIL = (process.env.FTP_API_EMAIL || "").trim();
+const FTP_API_PASSWORD = process.env.FTP_API_PASSWORD != null ? String(process.env.FTP_API_PASSWORD).trim() : "";
 
 let cachedToken = null;
 

@@ -2,15 +2,35 @@ const db = require("../config/db");
 const Brand = db.Brand;
 const SubCategory = db.SubCategory;
 const Product = db.Product;
+const { Op } = require("sequelize");
 
 /**
  * GET /api/filters/brands-and-subcategories
- * Returns brands and subcategories for filter dropdowns/sidebars.
- * Used by frontends that expect this single endpoint instead of /api/brands + /api/subcategories.
+ * Returns brands and subcategories with product counts for filter dropdowns/sidebars.
+ * Each item includes productCount (and count, product_count for compatibility).
  */
 exports.getBrandsAndSubcategories = async (req, res) => {
   try {
-    const [brands, subcategories] = await Promise.all([
+    const sequelize = db.sequelize;
+    const [brandCounts, subCatCounts, brands, subcategories] = await Promise.all([
+      Product.findAll({
+        attributes: [
+          "brandId",
+          [sequelize.fn("COUNT", sequelize.col("Product.id")), "productCount"],
+        ],
+        where: { brandId: { [Op.ne]: null } },
+        group: ["brandId"],
+        raw: true,
+      }),
+      Product.findAll({
+        attributes: [
+          "subCategoryId",
+          [sequelize.fn("COUNT", sequelize.col("Product.id")), "productCount"],
+        ],
+        where: { subCategoryId: { [Op.ne]: null } },
+        group: ["subCategoryId"],
+        raw: true,
+      }),
       Brand.findAll({
         order: [["title", "ASC"]],
         attributes: ["id", "title"],
@@ -21,15 +41,48 @@ exports.getBrandsAndSubcategories = async (req, res) => {
       }),
     ]);
 
+    const countByBrandId = Object.fromEntries(
+      (brandCounts || []).map((r) => {
+        const id = r.brandId ?? r.brand_id;
+        const count = Number(r.productCount ?? r.productcount ?? 0);
+        return [id, count];
+      })
+    );
+    const countBySubId = Object.fromEntries(
+      (subCatCounts || []).map((r) => {
+        const id = r.subCategoryId ?? r.sub_category_id;
+        const count = Number(r.productCount ?? r.productcount ?? 0);
+        return [id, count];
+      })
+    );
+
+    const brandsWithCount = (brands || []).map((b) => {
+      const c = countByBrandId[b.id] ?? 0;
+      return {
+        id: b.id,
+        title: b.title,
+        productCount: c,
+        count: c,
+        product_count: c,
+      };
+    });
+    const subcategoriesWithCount = (subcategories || []).map((s) => {
+      const c = countBySubId[s.id] ?? 0;
+      return {
+        id: s.id,
+        title: s.title,
+        parentId: s.parentId,
+        productCount: c,
+        count: c,
+        product_count: c,
+      };
+    });
+
     res.json({
       success: true,
       data: {
-        brands: brands.map((b) => ({ id: b.id, title: b.title })),
-        subcategories: subcategories.map((s) => ({
-          id: s.id,
-          title: s.title,
-          parentId: s.parentId,
-        })),
+        brands: brandsWithCount,
+        subcategories: subcategoriesWithCount,
       },
     });
   } catch (err) {
@@ -50,23 +103,27 @@ exports.getBrandsAndSubcategories = async (req, res) => {
 exports.getSidebarFilters = async (req, res) => {
   try {
     const sequelize = db.sequelize;
-    const productTable = Product.tableName || "products";
 
+    // Use Sequelize model so column names match the DB (camelCase or snake_case)
     const [categoryCounts, brandCounts, subcategories, brands] = await Promise.all([
-      sequelize.query(
-        `SELECT "subCategoryId" as id, COUNT(*)::int as "productCount"
-         FROM ${productTable}
-         WHERE "subCategoryId" IS NOT NULL
-         GROUP BY "subCategoryId"`,
-        { type: sequelize.QueryTypes.SELECT }
-      ),
-      sequelize.query(
-        `SELECT "brandId" as id, COUNT(*)::int as "productCount"
-         FROM ${productTable}
-         WHERE "brandId" IS NOT NULL
-         GROUP BY "brandId"`,
-        { type: sequelize.QueryTypes.SELECT }
-      ),
+      Product.findAll({
+        attributes: [
+          "subCategoryId",
+          [sequelize.fn("COUNT", sequelize.col("Product.id")), "productCount"],
+        ],
+        where: { subCategoryId: { [Op.ne]: null } },
+        group: ["subCategoryId"],
+        raw: true,
+      }),
+      Product.findAll({
+        attributes: [
+          "brandId",
+          [sequelize.fn("COUNT", sequelize.col("Product.id")), "productCount"],
+        ],
+        where: { brandId: { [Op.ne]: null } },
+        group: ["brandId"],
+        raw: true,
+      }),
       SubCategory.findAll({
         order: [["title", "ASC"]],
         attributes: ["id", "title"],
@@ -78,23 +135,41 @@ exports.getSidebarFilters = async (req, res) => {
     ]);
 
     const countBySubId = Object.fromEntries(
-      (categoryCounts || []).map((r) => [r.id, r.productCount])
+      (categoryCounts || []).map((r) => {
+        const id = r.subCategoryId ?? r.sub_category_id;
+        const count = Number(r.productCount ?? r.productcount ?? 0);
+        return [id, count];
+      })
     );
     const countByBrandId = Object.fromEntries(
-      (brandCounts || []).map((r) => [r.id, r.productCount])
+      (brandCounts || []).map((r) => {
+        const id = r.brandId ?? r.brand_id;
+        const count = Number(r.productCount ?? r.productcount ?? 0);
+        return [id, count];
+      })
     );
 
-    const categories = (subcategories || []).map((s) => ({
-      id: s.id,
-      title: s.title,
-      productCount: countBySubId[s.id] ?? 0,
-    }));
+    const categories = (subcategories || []).map((s) => {
+      const c = countBySubId[s.id] ?? 0;
+      return {
+        id: s.id,
+        title: s.title,
+        productCount: c,
+        count: c,
+        product_count: c,
+      };
+    });
 
-    const brandsWithCount = (brands || []).map((b) => ({
-      id: b.id,
-      title: b.title,
-      productCount: countByBrandId[b.id] ?? 0,
-    }));
+    const brandsWithCount = (brands || []).map((b) => {
+      const c = countByBrandId[b.id] ?? 0;
+      return {
+        id: b.id,
+        title: b.title,
+        productCount: c,
+        count: c,
+        product_count: c,
+      };
+    });
 
     res.json({
       success: true,

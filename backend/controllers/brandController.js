@@ -1,6 +1,8 @@
 
 const db = require('../config/db');
 const Brand = db.Brand;
+const Product = db.Product;
+const { Op } = require('sequelize');
 
 exports.createBrand = async (req, res) => {
   try {
@@ -11,10 +13,47 @@ exports.createBrand = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/brands
+ * Returns brands with id, title, name (alias), and product count (count / productCount / product_count).
+ */
 exports.getBrands = async (req, res) => {
   try {
-    const brands = await Brand.findAll();
-    res.json(brands);
+    const sequelize = db.sequelize;
+    const [brands, countRows] = await Promise.all([
+      Brand.findAll({ order: [["title", "ASC"]], attributes: ["id", "title"] }),
+      Product.findAll({
+        attributes: [
+          "brandId",
+          [sequelize.fn("COUNT", sequelize.col("Product.id")), "productCount"],
+        ],
+        where: { brandId: { [Op.ne]: null } },
+        group: ["brandId"],
+        raw: true,
+      }),
+    ]);
+
+    const countByBrandId = Object.fromEntries(
+      (countRows || []).map((r) => {
+        const id = r.brandId ?? r.brand_id;
+        const c = Number(r.productCount ?? r.productcount ?? 0);
+        return [id, c];
+      })
+    );
+
+    const list = (brands || []).map((b) => {
+      const c = countByBrandId[b.id] ?? 0;
+      return {
+        id: b.id,
+        title: b.title,
+        name: b.title,
+        count: c,
+        productCount: c,
+        product_count: c,
+      };
+    });
+
+    res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

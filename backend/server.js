@@ -5,7 +5,8 @@ const fs = require("fs");
 const path = require("path");
 const cron = require("node-cron");
 const axios = require("axios");
-require("dotenv").config();
+// Load .env from backend directory so credentials are found even when cwd is project root or Docker
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 // ✅ Import from config/db.js
 const db = require("./config/db");
@@ -480,6 +481,68 @@ app.get("/api/cron/job/:id", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/cron/ftp-icecat-status
+ * Check if FTP + Icecat matching crons can run (credentials, cache rows).
+ * Products are only stored when SKU+brand match in Icecat.
+ */
+app.get("/api/cron/ftp-icecat-status", async (req, res) => {
+  try {
+    const ftpEmail = process.env.FTP_API_EMAIL || "";
+    const ftpPassword = process.env.FTP_API_PASSWORD || "";
+    const ftpApiConfigured = !!(ftpEmail && ftpPassword);
+
+    let ftpCacheRows = 0;
+    if (db.FtpProductCache) {
+      try {
+        ftpCacheRows = await db.FtpProductCache.count();
+      } catch (_) {
+        ftpCacheRows = -1;
+      }
+    }
+
+    const crons = {
+      ftpCacheImport: {
+        schedule: "*/10 * * * *",
+        description: "Reads ftp_product_cache; for each SKU+brand calls Icecat; stores product only when Icecat matches.",
+        needsCacheRows: true,
+        cacheRows: ftpCacheRows,
+      },
+      ftpCacheFill: {
+        schedule: "*/10 * * * *",
+        description: "Fetches from vCloudTech API and fills ftp_product_cache (so FTP cache import has data).",
+        needsFtpApi: true,
+      },
+      vcloudtechIcecat: {
+        schedule: "*/10 * * * *",
+        description: "Fetches from vCloudTech API, for each product calls Icecat by SKU+brand; stores only when Icecat matches.",
+        needsFtpApi: true,
+      },
+    };
+
+    let message = "FTP+Icecat matching is enabled. ";
+    if (!ftpApiConfigured) {
+      message += "Set FTP_API_EMAIL and FTP_API_PASSWORD in .env for FTP cache fill and vCloudTech→Icecat cron to fetch data. ";
+    }
+    if (ftpCacheRows === 0 && db.FtpProductCache) {
+      message += "FTP cache has 0 rows – run FTP cache fill (or trigger /api/cron/trigger-ftp-cache-sync) to populate; then FTP cache import will match SKU+brand with Icecat. ";
+    }
+    if (ftpApiConfigured && ftpCacheRows > 0) {
+      message += "FTP cache import cron will pick new rows and match with Icecat by SKU+brand. ";
+    }
+
+    res.json({
+      success: true,
+      ftpApiConfigured,
+      ftpCacheRows: ftpCacheRows >= 0 ? ftpCacheRows : null,
+      crons,
+      message: message.trim(),
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Get all import jobs
 app.get("/api/cron/jobs", async (req, res) => {
   try {
@@ -577,6 +640,16 @@ const startServer = async () => {
       console.log(
         `🔄 FTP→Icecat (50/page, 44k pages): http://localhost:${PORT}/api/cron/trigger-vcloudtech-icecat-sync`
       );
+      console.log(
+        `📋 FTP+Icecat status (SKU+brand match): http://localhost:${PORT}/api/cron/ftp-icecat-status`
+      );
+      const ftpEmail = (process.env.FTP_API_EMAIL || "").trim();
+      const ftpPassword = process.env.FTP_API_PASSWORD != null ? String(process.env.FTP_API_PASSWORD).trim() : "";
+      if (ftpEmail && ftpPassword) {
+        console.log("✅ FTP API credentials: loaded (FTP_API_EMAIL is set; cache fill & vCloudTech→Icecat will use them)");
+      } else {
+        console.log("⚠️ FTP API credentials: missing – set FTP_API_EMAIL and FTP_API_PASSWORD in backend/.env for cache fill & FTP→Icecat");
+      }
 
       // Run FTP cache import once after 15s on startup (for testing). Disable later via RUN_FTP_IMPORT_ON_STARTUP=false
       const runFtpImportOnStartup = process.env.RUN_FTP_IMPORT_ON_STARTUP !== "false";
@@ -590,9 +663,16 @@ const startServer = async () => {
               {},
               { timeout: 600000 }
             );
-            console.log("✅ FTP cache import (startup) completed:", res.data?.message || res.data);
+            const msg = res.data?.message || res.data;
+            if (res.data?.results?.total === 0 && !res.data?.jobId)
+              console.log("ℹ️ FTP cache import (startup):", msg || "No import (cache model may be missing).");
+            else
+              console.log("✅ FTP cache import (startup) completed:", msg || res.data);
           } catch (e) {
-            console.error("❌ FTP cache import (startup) failed:", e.message);
+            const status = e.response?.status;
+            const detail = e.response?.data?.error || e.message;
+            console.warn("⚠️ FTP cache import (startup) failed:", detail || e.message, status ? `(HTTP ${status})` : "");
+            console.warn("   Set RUN_FTP_IMPORT_ON_STARTUP=false to disable.");
           }
         }, 15000);
         console.log("📥 FTP cache import will run once in 15s (testing). Set RUN_FTP_IMPORT_ON_STARTUP=false to disable.");
@@ -615,7 +695,8 @@ const startServer = async () => {
             if (res.data?.results?.total === 0 && String(msg || "").toLowerCase().includes("no new"))
               console.log("ℹ️ [Cron] No new products to import this run (all skipped or already in DB/attempted). Next run in 10 min.");
           } catch (e) {
-            console.error("❌ [Cron] FTP cache auto-import failed:", e.message);
+            const detail = e.response?.data?.error || e.message;
+            console.warn("⚠️ [Cron] FTP cache auto-import failed:", detail || e.message, e.response?.status ? `(HTTP ${e.response.status})` : "");
           }
         };
         run().catch((err) => console.error("❌ [Cron] FTP import run error:", err.message));
@@ -654,11 +735,13 @@ const startServer = async () => {
       if (vcloudtechIcecatSchedule) {
         cron.schedule(vcloudtechIcecatSchedule, () => {
           const run = async () => {
-            console.log("🕒 [Cron] FTP catalog→Icecat: fetching next page (50 products), matching Icecat, then next page...");
+            console.log("🕒 [Cron] FTP catalog→Icecat: fetching next page (50 products), matching Icecat by SKU+brand...");
             try {
               const result = await runVcloudtechIcecatSync({}, null);
               if (result) {
-                console.log("✅ [Cron] FTP→Icecat: page " + result.page + " → fetched=" + result.fetched + ", matched=" + result.matched + ", next_page=" + result.nextPage);
+                console.log("✅ [Cron] FTP→Icecat: page " + result.page + " → fetched=" + result.fetched + ", matched=" + result.matched + " (SKU+brand in Icecat), next_page=" + result.nextPage);
+              } else {
+                console.warn("⚠️ [Cron] FTP→Icecat: no result (check FTP_API_EMAIL/FTP_API_PASSWORD or API errors).");
               }
             } catch (e) {
               console.error("❌ [Cron] FTP→Icecat failed:", e.message);

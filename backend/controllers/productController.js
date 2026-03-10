@@ -2282,9 +2282,11 @@ exports.bulkImportProducts = async (req, res) => {
 exports.importFromFtpCache = async (req, res) => {
   try {
     if (!FtpProductCache) {
-      return res.status(500).json({
-        success: false,
-        error: "FtpProductCache model not available. Sync FTP cache first.",
+      return res.status(200).json({
+        success: true,
+        message: "FtpProductCache model not available. Add the model and sync FTP cache to enable import. Skipping.",
+        jobId: null,
+        results: { total: 0, successful: 0, failed: 0, skipped: 0 },
       });
     }
 
@@ -3095,6 +3097,59 @@ exports.getProductsCount = async (req, res) => {
 
 exports.getProducts = async (req, res) => {
   try {
+    // Single product by query id: GET /api/products?id=123 returns only that product (not first page).
+    const queryId = req.query.id != null ? String(req.query.id).trim() : null;
+    if (queryId) {
+      const productId = parseInt(queryId, 10);
+      if (!Number.isNaN(productId) && productId >= 1) {
+        const product = await Product.findByPk(productId, {
+          include: [
+            { model: Brand, as: "brand" },
+            { model: Category, as: "category" },
+            { model: SubCategory, as: "subCategory" },
+            { model: Image, as: "images" },
+            { model: Gallery, as: "galleries" },
+            { model: db.ProductDocument, as: "documents" },
+            { model: db.ProductBulletPoint, as: "bulletPoints", order: [["orderIndex", "ASC"]] },
+            { model: db.TechProduct, as: "techProducts", include: [{ model: db.TechProductName, as: "specification", attributes: ["id", "title"] }] },
+            { model: ProductTag, as: "tags", through: { attributes: [] }, required: false },
+          ],
+        });
+        if (!product) {
+          return res.status(404).json({ error: "Product not found" });
+        }
+        const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+        const toUploadUrl = (filename) => {
+          if (!filename) return null;
+          const f = String(filename).trim();
+          if (!f) return null;
+          if (/^https?:\/\//i.test(f)) return f;
+          return `${baseUrl}/uploads/${encodeURIComponent(f)}`;
+        };
+        const j = typeof product.toJSON === "function" ? product.toJSON() : product;
+        const brandTitle = j?.brand?.title || null;
+        const techProductsWithTitle = Array.isArray(j.techProducts)
+          ? j.techProducts.map((t) => ({
+              ...t,
+              techProductName: t?.specification ? { title: t.specification.title } : null,
+            }))
+          : [];
+        const single = {
+          ...j,
+          techProducts: techProductsWithTitle,
+          brandTitle,
+          brandName: brandTitle,
+          mainImageUrl: toUploadUrl(j.mainImage),
+          imageUrls: Array.isArray(j.images) ? j.images.map((im) => toUploadUrl(im.url)).filter(Boolean) : [],
+          galleryUrls: Array.isArray(j.galleries) ? j.galleries.map((g) => toUploadUrl(g.url)).filter(Boolean) : [],
+        };
+        return res.json({
+          data: [single],
+          pagination: { page: 1, limit: 1, total: 1, pages: 1 },
+        });
+      }
+    }
+
     const onlyMatched = (req.query.matched_only ?? req.query.matched ?? "true").toString().toLowerCase() !== "false";
     let where = onlyMatched ? { productSource: "icecat" } : {};
 
