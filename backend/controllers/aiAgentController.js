@@ -122,8 +122,16 @@ exports.getAIAgents = async (req, res) => {
       limit = 20,
       search,
       categoryId,
+      category_id,
+      category,
+      categoryName,
+      category_name,
       categoryIds,
       deliveryMethodId,
+      delivery_method_id,
+      deliveryMethod,
+      deliveryMethodName,
+      delivery_method,
       deliveryMethodIds,
       publisherId,
       publisherIds,
@@ -146,42 +154,109 @@ exports.getAIAgents = async (req, res) => {
       ];
     }
 
-    // Category filter
-    if (categoryId) {
-      const category = await AICategory.findByPk(categoryId);
-      if (category) {
-        const agentIds = (await category.getAgents({ attributes: ["id"] })).map((a) => a.id);
-        whereClause.id = { [Op.in]: agentIds };
+    // Category filter: support categoryId, category_id (id), and category, categoryName, category_name (name/slug)
+    const categoryIdParam = categoryId || category_id;
+    const categoryNameParam = category || categoryName || category_name;
+    const isAllCategory =
+      categoryNameParam &&
+      ["ai-agents-tools", "all", "ai agents & tools"].includes(String(categoryNameParam).trim().toLowerCase());
+
+    if (!isAllCategory && (categoryIdParam || categoryNameParam || categoryIds)) {
+      let agentIdsFromCategory = null;
+
+      // By id (single)
+      if (categoryIdParam) {
+        const catId = parseInt(categoryIdParam, 10);
+        if (!Number.isNaN(catId)) {
+          const categoryRecord = await AICategory.findByPk(catId);
+          if (categoryRecord) {
+            const agents = await categoryRecord.getAgents({ attributes: ["id"] });
+            agentIdsFromCategory = agents.map((a) => a.id);
+          }
+        }
+      }
+
+      // By name or slug (e.g. "Tools", "AI Agents", "ai-agents-tools")
+      if (categoryNameParam && !agentIdsFromCategory) {
+        const nameOrSlug = String(categoryNameParam).trim();
+        const categoryRecord = await AICategory.findOne({
+          where: {
+            [Op.or]: [
+              { name: { [Op.iLike]: nameOrSlug } },
+              { slug: { [Op.iLike]: nameOrSlug } },
+            ],
+          },
+        });
+        if (categoryRecord) {
+          const agents = await categoryRecord.getAgents({ attributes: ["id"] });
+          agentIdsFromCategory = agents.map((a) => a.id);
+        }
+      }
+
+      // By multiple ids (categoryIds)
+      if (categoryIds) {
+        const ids = Array.isArray(categoryIds)
+          ? categoryIds
+          : categoryIds.split(",").map((id) => parseInt(String(id).trim(), 10)).filter((id) => !Number.isNaN(id));
+        if (ids.length > 0) {
+          const agentsWithCategories = await AIAgent.findAll({
+            attributes: ["id"],
+            include: [
+              {
+                model: AICategory,
+                as: "categories",
+                where: { id: { [Op.in]: ids } },
+                through: { attributes: [] },
+              },
+            ],
+          });
+          const idsFromCategoryIds = agentsWithCategories.map((a) => a.id);
+          agentIdsFromCategory =
+            agentIdsFromCategory && agentIdsFromCategory.length > 0
+              ? [...new Set([...agentIdsFromCategory, ...idsFromCategoryIds])]
+              : idsFromCategoryIds;
+        }
+      }
+
+      if (agentIdsFromCategory && agentIdsFromCategory.length > 0) {
+        whereClause.id = { [Op.in]: agentIdsFromCategory };
+      } else if (agentIdsFromCategory && agentIdsFromCategory.length === 0) {
+        // Category matched but no agents in it – return empty result
+        whereClause.id = { [Op.in]: [] };
       }
     }
 
-    if (categoryIds) {
-      const ids = Array.isArray(categoryIds) ? categoryIds : categoryIds.split(",").map((id) => parseInt(id.trim()));
-      const agentsWithCategories = await AIAgent.findAll({
-        attributes: ["id"],
-        include: [
-          {
-            model: AICategory,
-            as: "categories",
-            where: { id: { [Op.in]: ids } },
-            through: { attributes: [] },
-          },
-        ],
-      });
-      const agentIds = agentsWithCategories.map((a) => a.id);
-      whereClause.id = { [Op.in]: agentIds };
-    }
+    // Delivery method filter: support deliveryMethodId, delivery_method_id (id), and deliveryMethod, deliveryMethodName, delivery_method (name/slug)
+    const deliveryMethodIdParam = deliveryMethodId || delivery_method_id;
+    const deliveryMethodNameParam = deliveryMethod || deliveryMethodName || delivery_method;
 
-    // Delivery method filter
-    if (deliveryMethodId) {
-      whereClause.deliveryMethodId = deliveryMethodId;
+    if (deliveryMethodIdParam) {
+      const dmId = parseInt(deliveryMethodIdParam, 10);
+      if (!Number.isNaN(dmId)) {
+        whereClause.deliveryMethodId = dmId;
+      }
+    } else if (deliveryMethodNameParam) {
+      const nameOrSlug = String(deliveryMethodNameParam).trim();
+      const dm = await DeliveryMethod.findOne({
+        where: {
+          [Op.or]: [
+            { name: { [Op.iLike]: nameOrSlug } },
+            { slug: { [Op.iLike]: nameOrSlug } },
+          ],
+        },
+      });
+      if (dm) {
+        whereClause.deliveryMethodId = dm.id;
+      }
     }
 
     if (deliveryMethodIds) {
       const ids = Array.isArray(deliveryMethodIds)
         ? deliveryMethodIds
-        : deliveryMethodIds.split(",").map((id) => parseInt(id.trim()));
-      whereClause.deliveryMethodId = { [Op.in]: ids };
+        : deliveryMethodIds.split(",").map((id) => parseInt(id.trim(), 10)).filter((id) => !Number.isNaN(id));
+      if (ids.length > 0) {
+        whereClause.deliveryMethodId = { [Op.in]: ids };
+      }
     }
 
     // Publisher filter

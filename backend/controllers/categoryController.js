@@ -2,6 +2,8 @@
 
 const db = require('../config/db');
 const Category = db.Category;
+const SubCategory = db.SubCategory;
+const { Op } = require('sequelize');
 
 exports.createCategory = async (req, res) => {
   try {
@@ -14,8 +16,42 @@ exports.createCategory = async (req, res) => {
 
 exports.getCategories = async (req, res) => {
   try {
-    const categories = await Category.findAll();
-    res.json(categories);
+    const includeSubcategories = (req.query.includeSubcategories || '').toString().toLowerCase() === 'true';
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Number.isNaN(limitRaw) || limitRaw < 1 ? 1000 : Math.min(5000, limitRaw);
+
+    const categories = await Category.findAll({
+      limit,
+      order: [['title', 'ASC']],
+    });
+
+    if (!includeSubcategories) {
+      return res.json(categories);
+    }
+
+    const categoryIds = categories.map((c) => c.id);
+    if (categoryIds.length === 0) {
+      return res.json(categories.map((c) => ({ ...c.toJSON(), subcategories: [] })));
+    }
+
+    const subcategories = await SubCategory.findAll({
+      where: { parentId: { [Op.in]: categoryIds } },
+      order: [['title', 'ASC']],
+    });
+
+    const byParent = {};
+    subcategories.forEach((s) => {
+      const pid = s.parentId;
+      if (!byParent[pid]) byParent[pid] = [];
+      byParent[pid].push(s);
+    });
+
+    const result = categories.map((c) => {
+      const j = typeof c.toJSON === 'function' ? c.toJSON() : c;
+      return { ...j, subcategories: byParent[c.id] || [] };
+    });
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

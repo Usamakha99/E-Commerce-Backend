@@ -255,6 +255,12 @@ app.get("/api/status", (req, res) => {
   });
 });
 
+// --- Fast health check (no DB) – use for proxy/gateway liveness; avoids 504 from slow upstream ---
+app.get("/api/health", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.status(200).json({ ok: true, ts: new Date().toISOString() });
+});
+
 // ✅ PRODUCT IMPORT CRON JOB ROUTES
 let cronInstance = null;
 

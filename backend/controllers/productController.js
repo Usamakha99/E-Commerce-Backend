@@ -2680,8 +2680,24 @@ exports.exportImportJobExcel = async (req, res) => {
 
 exports.getimportsProducts = async (req, res) => {
   try {
-    const importedProducts = await Product.findAll({
-      where: { productSource: "icecat" },
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+    const sortParam = (req.query.sort || "latest").toString().toLowerCase();
+    const orderField = sortParam === "title" ? "title" : sortParam === "price" ? "price" : "id";
+    const orderDir = (req.query.sortOrder || "DESC").toString().toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+    const where = { productSource: "icecat" };
+    if (req.query.status !== undefined && req.query.status !== "") {
+      if (String(req.query.status).toLowerCase() === "completed") {
+        where.productSource = "icecat";
+      } else if (String(req.query.status).toLowerCase() === "all") {
+        delete where.productSource;
+      }
+    }
+
+    const { count, rows: importedProducts } = await Product.findAndCountAll({
+      where,
       include: [
         { model: Brand, as: "brand" },
         { model: Category, as: "category" },
@@ -2695,12 +2711,21 @@ exports.getimportsProducts = async (req, res) => {
         },
         { model: db.Gallery, as: "galleries", order: [["orderIndex", "ASC"]] },
       ],
-      order: [["id", "DESC"]],
+      order: [[orderField, orderDir]],
+      limit,
+      offset,
+      distinct: true,
     });
 
     res.status(200).json({
       message: "Imported products retrieved successfully",
       data: importedProducts,
+      pagination: {
+        page,
+        limit,
+        total: count,
+        pages: Math.ceil(count / limit) || 1,
+      },
     });
   } catch (err) {
     console.error("Error in getimportsProducts:", err);
@@ -3163,6 +3188,14 @@ exports.getProducts = async (req, res) => {
       }
     }
 
+    const brandIds = await getBrandIdsFromQuery(req);
+    if (brandIds.length > 0) {
+      const brandWhere = { brandId: { [Op.in]: brandIds } };
+      where = Object.keys(where).length
+        ? { [Op.and]: [where, brandWhere] }
+        : brandWhere;
+    }
+
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const offset = (page - 1) * limit;
@@ -3591,6 +3624,36 @@ const getCategoryFilterWhere = async (id) => {
     console.error("getCategoryFilterWhere error:", err.message);
     return { [Op.or]: [{ subCategoryId: numId }, { categoryId: numId }] };
   }
+};
+
+/**
+ * Parse brand filter from query: brandId, brand_id (by id), brands, brand (by name, comma-separated).
+ * Returns array of brand ids to filter by, or empty array if none.
+ */
+const getBrandIdsFromQuery = async (req) => {
+  const ids = [];
+  const rawId = req.query.brandId ?? req.query.brand_id;
+  if (rawId != null && rawId !== "") {
+    const arr = Array.isArray(rawId) ? rawId : [rawId];
+    arr.forEach((v) => {
+      const n = parseInt(String(v).trim(), 10);
+      if (!Number.isNaN(n) && n >= 1) ids.push(n);
+    });
+  }
+  const rawName = req.query.brands ?? req.query.brand;
+  if (rawName != null && rawName !== "") {
+    const names = String(rawName)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (names.length > 0) {
+      const idsByName = await getBrandIds(names);
+      idsByName.forEach((id) => {
+        if (!ids.includes(id)) ids.push(id);
+      });
+    }
+  }
+  return [...new Set(ids)];
 };
 
 
