@@ -16,10 +16,10 @@ const RecentProducts = () => {
   const fetchRecentProducts = async () => {
     try {
       setLoading(true);
-      const response = await getProducts();
-      const allProducts = Array.isArray(response.data) 
-        ? response.data 
-        : response.data?.data || [];
+      const response = await getProducts({ page: 1, limit: 50 });
+      const allProducts = Array.isArray(response?.data)
+        ? response.data
+        : response?.data?.data || [];
       
       // Sort by createdAt and take latest 5
       const recent = allProducts

@@ -88,6 +88,8 @@ router.post('/:id/enrich-from-icecat', productController.enrichProductFromIcecat
 // ===== BASIC CRUD ROUTES =====
 router.post('/', uploadFiles, productController.createProduct);
 router.get('/', productController.getProducts);
+// GET /api/products/:id – single product by ID. Detail page should use this first (works for any pagination page).
+// If you use ?id=X on the list endpoint instead, only page 1 is available, so page 2+ products won’t load; use this by ID.
 router.get('/:id', productController.getProduct);
 // router.put('/:id', uploadFiles, productController.updateProduct); // This is the problematic route
 // router.delete('/:id', productController.deleteProduct);

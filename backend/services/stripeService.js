@@ -1,10 +1,14 @@
 
 let stripe;
 try {
-  const Stripe = require('stripe');
-  stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (key && String(key).trim()) {
+    const Stripe = require('stripe');
+    stripe = Stripe(key);
+  } else {
+    stripe = null;
+  }
 } catch (error) {
-  console.warn('⚠️ Stripe not initialized. Payment features will be disabled.');
   stripe = null;
 }
 

@@ -8,7 +8,7 @@ module.exports = (sequelize) => {
     {
       id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
       specId: { type: DataTypes.INTEGER, allowNull: false },
-      value: { type: DataTypes.STRING(255), allowNull: false },
+      value: { type: DataTypes.TEXT, allowNull: false },
       techspecgroupId: { type: DataTypes.INTEGER, allowNull: false },
     },
     {

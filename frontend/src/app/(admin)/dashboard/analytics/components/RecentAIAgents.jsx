@@ -95,10 +95,10 @@ const RecentAIAgents = () => {
                     </td>
                     <td>{agent.provider || agent.soldBy || '-'}</td>
                     <td>
-                      {agent.rating ? (
+                      {agent.rating != null && !Number.isNaN(Number(agent.rating)) ? (
                         <div className="d-flex align-items-center gap-1">
                           <IconifyIcon icon="bx:star" className="text-warning" />
-                          <span>{agent.rating.toFixed(1)}</span>
+                          <span>{Number(agent.rating).toFixed(1)}</span>
                         </div>
                       ) : (
                         '-'

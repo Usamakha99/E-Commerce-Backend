@@ -25,9 +25,9 @@ const ProductsListTable = () => {
   const fetchProducts = async () => {
     try {
       setLoading(true)
-      const response = await getProducts()
-      setProducts(response || [])
-      console.log('Products fetched:', response)
+      const result = await getProducts({ page: 1, limit: 500 })
+      const list = Array.isArray(result?.data) ? result.data : []
+      setProducts(list)
     } catch (err) {
       setError(err.message || 'Failed to fetch products')
       console.error('Error fetching products:', err)

@@ -7,7 +7,7 @@ const BACKEND_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
 const api = axios.create({
   baseURL: BACKEND_BASE,
   withCredentials: false,
-  timeout: 30000, // Increased timeout
+  timeout: 60000, // 60s for slow endpoints (e.g. products list with 20k+ DB)
   headers: {
     "Content-Type": "application/json",
     Accept: "application/json",

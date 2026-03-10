@@ -456,10 +456,14 @@ export const createProduct = async (formData) => {
   }
 }
 
-export const getProducts = async () => {
+export const getProducts = async (params = {}) => {
   try {
-    const response = await api.get('/api/products')
-    return response.data
+    const response = await api.get('/api/products', { params })
+    const body = response.data
+    if (body && typeof body.data !== 'undefined' && Array.isArray(body.data)) {
+      return body
+    }
+    return { data: body, pagination: { page: 1, limit: body?.length ?? 0, total: body?.length ?? 0, pages: 1 } }
   } catch (error) {
     throw error
   }

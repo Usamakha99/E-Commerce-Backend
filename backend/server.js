@@ -225,6 +225,14 @@ try {
 // 🔥 END PUBLISHER ROUTES 🔥
 // ============================================
 
+try {
+  const filterRoutes = require("./routes/filterRoutes");
+  app.use("/api/filters", filterRoutes);
+  console.log("✅ Filter routes registered: /api/filters");
+} catch (error) {
+  console.error("❌ Error loading filter routes:", error.message);
+}
+
 // --- Health Check ---
 app.get("/", (req, res) => {
   res.json({

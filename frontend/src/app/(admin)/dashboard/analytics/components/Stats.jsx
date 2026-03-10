@@ -48,11 +48,12 @@ const Stats = () => {
     try {
       setLoading(true);
       
-      // Fetch Products
-      const productsResponse = await getProducts();
-      const products = Array.isArray(productsResponse.data) 
-        ? productsResponse.data 
-        : productsResponse.data?.data || [];
+      // Fetch Products (first page only for stats count; use pagination total when available)
+      const productsResponse = await getProducts({ page: 1, limit: 1 });
+      const paginationTotal = productsResponse?.pagination?.total;
+      const products = Array.isArray(productsResponse?.data)
+        ? productsResponse.data
+        : productsResponse?.data?.data || [];
       
       // Fetch AI Agents
       const agentsResponse = await getAIAgents({ limit: 1 });
@@ -66,7 +67,7 @@ const Stats = () => {
       const uniqueCategories = new Set(products.map(p => p.categoryId).filter(Boolean));
       
       setStats({
-        totalProducts: products.length,
+        totalProducts: typeof paginationTotal === 'number' ? paginationTotal : products.length,
         totalAIAgents: agentsTotal,
         aiCategories: aiCategories,
         productCategories: uniqueCategories.size,

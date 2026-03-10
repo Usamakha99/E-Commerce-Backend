@@ -3095,11 +3095,18 @@ exports.getProductsCount = async (req, res) => {
 
 exports.getProducts = async (req, res) => {
   try {
-    // Only show products that actually matched in Icecat (FTP + Icecat). Hide external_api (404 minimal), manual, other.
     const onlyMatched = (req.query.matched_only ?? req.query.matched ?? "true").toString().toLowerCase() !== "false";
-    const where = onlyMatched ? { productSource: "icecat" } : {};
+    let where = onlyMatched ? { productSource: "icecat" } : {};
 
-    const products = await Product.findAll({
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+    const sortParam = (req.query.sort || "latest").toString().toLowerCase();
+    const sortOrder = (req.query.sortOrder || "DESC").toString().toUpperCase() === "ASC" ? "ASC" : "DESC";
+    // Product model has timestamps: false, so no createdAt; use id for "latest"
+    const sortField = sortParam === "title" ? "title" : sortParam === "price" ? "price" : "id";
+
+    const queryOptions = {
       where,
       include: [
         { model: Brand, as: "brand" },
@@ -3108,7 +3115,28 @@ exports.getProducts = async (req, res) => {
         { model: Image, as: "images" },
         { model: Gallery, as: "galleries" },
       ],
-    });
+      order: [[sortField, sortOrder]],
+      limit,
+      offset,
+      distinct: true,
+    };
+
+    let count;
+    let products;
+    try {
+      const result = await Product.findAndCountAll(queryOptions);
+      count = result.count;
+      products = result.rows;
+    } catch (queryErr) {
+      if (onlyMatched) {
+        queryOptions.where = {};
+        const result = await Product.findAndCountAll(queryOptions);
+        count = result.count;
+        products = result.rows;
+      } else {
+        throw queryErr;
+      }
+    }
 
     const baseUrl =
       process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
@@ -3117,7 +3145,6 @@ exports.getProducts = async (req, res) => {
       const f = String(filename).trim();
       if (!f) return null;
       if (/^https?:\/\//i.test(f)) return f;
-      // Use /uploads/<filename> (server fallback handles /uploads/products too)
       return `${baseUrl}/uploads/${encodeURIComponent(f)}`;
     };
 
@@ -3126,10 +3153,8 @@ exports.getProducts = async (req, res) => {
       const brandTitle = j?.brand?.title || null;
       return {
         ...j,
-        // brand compatibility for older frontends
         brandTitle,
         brandName: brandTitle,
-        // image URLs (absolute)
         mainImageUrl: toUploadUrl(j.mainImage),
         imageUrls: Array.isArray(j.images)
           ? j.images.map((im) => toUploadUrl(im.url)).filter(Boolean)
@@ -3140,15 +3165,38 @@ exports.getProducts = async (req, res) => {
       };
     });
 
-    res.json(out);
+    res.json({
+      data: out,
+      pagination: {
+        page,
+        limit,
+        total: count,
+        pages: Math.ceil(count / limit) || 1,
+      },
+    });
   } catch (err) {
+    console.error("getProducts error:", err.message);
     res.status(500).json({ error: err.message });
   }
 };
 
+/**
+ * GET /api/products/:id – single product by ID.
+ * Use this for the product detail page; works for any product regardless of list pagination.
+ * (Using ?id=X on the list endpoint only returns page 1, so page 2+ products need this.)
+ */
 exports.getProduct = async (req, res) => {
   try {
-    const product = await Product.findByPk(req.params.id, {
+    const id = req.params.id;
+    if (id == null || id === '') {
+      return res.status(400).json({ error: "Product ID is required" });
+    }
+    const productId = parseInt(id, 10);
+    if (Number.isNaN(productId) || productId < 1) {
+      return res.status(400).json({ error: "Invalid product ID" });
+    }
+
+    const product = await Product.findByPk(productId, {
       include: [
         { model: Brand, as: "brand" },
         { model: Category, as: "category" },
@@ -3167,6 +3215,11 @@ exports.getProduct = async (req, res) => {
           through: { attributes: [] },
           required: false,
         },
+        {
+          model: db.TechProduct,
+          as: "techProducts",
+          include: [{ model: db.TechProductName, as: "specification", attributes: ["id", "title"] }],
+        },
       ],
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
@@ -3183,8 +3236,15 @@ exports.getProduct = async (req, res) => {
 
     const j = typeof product.toJSON === "function" ? product.toJSON() : product;
     const brandTitle = j?.brand?.title || null;
+    const techProductsWithTitle = Array.isArray(j.techProducts)
+      ? j.techProducts.map((t) => ({
+          ...t,
+          techProductName: t?.specification ? { title: t.specification.title } : null,
+        }))
+      : [];
     return res.json({
       ...j,
+      techProducts: techProductsWithTitle,
       brandTitle,
       brandName: brandTitle,
       mainImageUrl: toUploadUrl(j.mainImage),
@@ -3261,8 +3321,7 @@ exports.getFilterBrands = async (req, res) => {
 exports.getFilterCategories = async (req, res) => {
   try {
     const categories = await Category.findAll({
-      attributes: ["id", "title", "description"],
-      where: { status: "active" },
+      attributes: ["id", "title"],
       order: [["title", "ASC"]],
     });
     res.status(200).json({ success: true, data: categories });
