@@ -174,11 +174,11 @@ class EmailService {
     `;
   }
 
-  async sendInquiryNotificationEmail(inquiryData, adminEmail = null) {
+  async sendInquiryNotificationEmail(inquiryData, adminEmail = null, dashboardBaseUrl = null) {
     try {
       // Priority: 1. adminEmail parameter, 2. ADMIN_EMAIL env, 3. SMTP_USER as fallback
       const recipientEmail = adminEmail || process.env.ADMIN_EMAIL || process.env.SMTP_USER;
-      
+
       if (!recipientEmail) {
         console.error('❌ No admin email configured');
         return { success: false, error: 'No admin email configured' };
@@ -188,11 +188,11 @@ class EmailService {
         from: `"${process.env.APP_NAME || 'E-Commerce'}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
         to: recipientEmail,
         subject: `New Product Inquiry - ${inquiryData.helpType}`,
-        html: this.getInquiryNotificationEmailTemplate(inquiryData),
+        html: this.getInquiryNotificationEmailTemplate(inquiryData, dashboardBaseUrl),
       };
 
       const result = await this.transporter.sendMail(mailOptions);
-      console.log(`✅ Inquiry notification email sent to ${adminEmail}, Message ID: ${result.messageId}`);
+      console.log(`✅ Inquiry notification email sent to ${recipientEmail}, Message ID: ${result.messageId}`);
       return { success: true, messageId: result.messageId };
     } catch (error) {
       console.error('❌ Error sending inquiry notification email:', error);
@@ -218,7 +218,17 @@ class EmailService {
     }
   }
 
-  getInquiryNotificationEmailTemplate(inquiry) {
+  getInquiryNotificationEmailTemplate(inquiry, dashboardBaseUrl = null) {
+    let baseUrl = (dashboardBaseUrl && String(dashboardBaseUrl).trim()) || process.env.ADMIN_URL || 'http://localhost:5174';
+    baseUrl = baseUrl.replace(/\/$/, '');
+    // Use port 5001 for dashboard link (not 3005 or other frontend port)
+    const dashboardPort = process.env.ADMIN_PORT || '5001';
+    try {
+      const u = new URL(baseUrl);
+      u.port = dashboardPort;
+      baseUrl = u.origin;
+    } catch (_) {}
+    const inquiriesPath = `${baseUrl}/ecommerce/inquiries`;
     const helpTypeLabels = {
       pricing: 'Volume Pricing',
       shipping: 'Shipping Options',
@@ -312,7 +322,7 @@ class EmailService {
             </p>
 
             <p style="text-align: center; margin-top: 30px;">
-              <a href="${process.env.ADMIN_URL || 'http://localhost:5174'}/ecommerce/inquiries" class="button">
+              <a href="${inquiriesPath}" class="button">
                 View Inquiry in Dashboard
               </a>
             </p>

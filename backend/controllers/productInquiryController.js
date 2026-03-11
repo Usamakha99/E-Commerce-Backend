@@ -66,9 +66,10 @@ exports.createProductInquiry = async (req, res) => {
         : [],
     });
 
-    // Send email notification to admin
+    // Send email notification to admin (use request Origin or body so Gmail link uses current IP/port, not localhost)
+    const dashboardBaseUrl = req.body.dashboardBaseUrl || req.get("Origin") || null;
     try {
-      await emailService.sendInquiryNotificationEmail(inquiryWithProduct);
+      await emailService.sendInquiryNotificationEmail(inquiryWithProduct, undefined, dashboardBaseUrl);
       console.log("✅ Inquiry notification email sent to admin");
     } catch (emailError) {
       console.error("❌ Failed to send inquiry notification email:", emailError);
