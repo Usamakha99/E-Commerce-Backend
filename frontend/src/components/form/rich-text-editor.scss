@@ -1,0 +1,4 @@
+/* Extra vertical space inside the editable region (toolbar sits above .ql-container). */
+.rich-text-editor-root .ql-container {
+  min-height: 12rem;
+}

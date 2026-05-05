@@ -5,6 +5,7 @@ import IconifyIcon from '@/components/wrappers/IconifyIcon';
 import { deleteAIAgent } from '@/http/AIAgent';
 import toast from 'react-hot-toast';
 import { Badge } from 'react-bootstrap';
+import { stripHtml } from '@/utils/rich-text';
 
 const AIAgentsListTable = ({ agents, loading, onDelete, pagination, onPageChange }) => {
   const handleDelete = async (id, name) => {
@@ -88,11 +89,15 @@ const AIAgentsListTable = ({ agents, loading, onDelete, pagination, onPageChange
     },
     {
       header: 'Description',
-      cell: ({ row: { original: { shortDescription, description } } }) => (
-        <div className="text-truncate" style={{ maxWidth: '300px' }}>
-          {shortDescription || description || '-'}
-        </div>
-      ),
+      cell: ({ row: { original: { shortDescription, description } } }) => {
+        const raw = shortDescription || description || '';
+        const text = raw ? stripHtml(raw) : '';
+        return (
+          <div className="text-truncate" style={{ maxWidth: '300px' }} title={text}>
+            {text || '-'}
+          </div>
+        );
+      },
     },
     {
       header: 'Rating',

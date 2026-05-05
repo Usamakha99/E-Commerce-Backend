@@ -3,6 +3,9 @@ import { Col, Row, Form, Button, Table } from 'react-bootstrap';
 import IconifyIcon from '@/components/wrappers/IconifyIcon';
 import toast from 'react-hot-toast';
 import { updateAIAgent } from '@/http/AIAgent';
+import RichTextEditor from '@/components/form/RichTextEditor';
+import RichTextHtml from '@/components/form/RichTextHtml';
+import { isRichTextEmpty } from '@/utils/rich-text';
 
 const HowToBuyTabForm = ({ agent, onUpdate }) => {
   const [formData, setFormData] = useState({
@@ -168,10 +171,10 @@ const HowToBuyTabForm = ({ agent, onUpdate }) => {
         <div className="border rounded p-4 mb-4" style={{ backgroundColor: 'white' }}>
           <div className="d-flex justify-content-between align-items-start mb-3">
             <div style={{ flex: 1 }}>
-              {pricing.description ? (
-                <p style={{ fontSize: '15px', lineHeight: '1.7', marginBottom: '12px' }}>
-                  {pricing.description}
-                </p>
+              {pricing.description && !isRichTextEmpty(pricing.description) ? (
+                <div style={{ fontSize: '15px', lineHeight: '1.7', marginBottom: '12px' }}>
+                  <RichTextHtml html={pricing.description} />
+                </div>
               ) : (
                 <>
                   <p style={{ fontSize: '15px', lineHeight: '1.7', marginBottom: '12px' }}>
@@ -286,14 +289,14 @@ const HowToBuyTabForm = ({ agent, onUpdate }) => {
         )}
 
         {/* Vendor Refund Policy */}
-        {pc.refundPolicy && pc.refundPolicy.trim() && (
+        {pc.refundPolicy && !isRichTextEmpty(pc.refundPolicy) && (
           <div className="border rounded p-4 mb-4" style={{ backgroundColor: 'white' }}>
             <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '12px' }}>
               Vendor Refund Policy
             </h3>
-            <p style={{ fontSize: '14px', lineHeight: '1.7', margin: 0 }}>
-              {pc.refundPolicy}
-            </p>
+            <div style={{ fontSize: '14px', lineHeight: '1.7', margin: 0 }}>
+              <RichTextHtml html={pc.refundPolicy} />
+            </div>
           </div>
         )}
 
@@ -303,10 +306,10 @@ const HowToBuyTabForm = ({ agent, onUpdate }) => {
             <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '12px' }}>
               Custom Pricing Options
             </h3>
-            {pc.customPricing.description ? (
-              <p style={{ fontSize: '14px', lineHeight: '1.7', margin: 0 }}>
-                {pc.customPricing.description}
-              </p>
+            {pc.customPricing.description && !isRichTextEmpty(pc.customPricing.description) ? (
+              <div style={{ fontSize: '14px', lineHeight: '1.7', margin: 0 }}>
+                <RichTextHtml html={pc.customPricing.description} />
+              </div>
             ) : (
               <p style={{ fontSize: '14px', lineHeight: '1.7', margin: 0 }}>
                 Request a private offer to receive a custom quote.
@@ -343,12 +346,11 @@ const HowToBuyTabForm = ({ agent, onUpdate }) => {
             </div>
             <div className="mb-3">
               <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows="3"
+              <RichTextEditor
                 value={formData.pricingContent.freeTrial.description}
-                onChange={(e) => handleInputChange('freeTrial', 'description', e.target.value)}
+                onChange={(v) => handleInputChange('freeTrial', 'description', v)}
                 placeholder="Try this product free according to the free trial terms..."
+                editorMinHeight={220}
               />
             </div>
             <div className="mb-3">
@@ -371,12 +373,11 @@ const HowToBuyTabForm = ({ agent, onUpdate }) => {
             <h4 className="mb-3">Pricing Information</h4>
             <div className="mb-3">
               <label className="form-label">Pricing Description (Optional - leave empty for default text)</label>
-              <textarea
-                className="form-control"
-                rows="4"
+              <RichTextEditor
                 value={formData.pricingContent.pricing.description}
-                onChange={(e) => handleInputChange('pricing', 'description', e.target.value)}
+                onChange={(v) => handleInputChange('pricing', 'description', v)}
                 placeholder="Leave empty to use default pricing description..."
+                editorMinHeight={270}
               />
             </div>
           </div>
@@ -515,18 +516,17 @@ const HowToBuyTabForm = ({ agent, onUpdate }) => {
             <h4 className="mb-3">Vendor Refund Policy</h4>
             <div className="mb-3">
               <label className="form-label">Refund Policy Text</label>
-              <textarea
-                className="form-control"
-                rows="4"
+              <RichTextEditor
                 value={formData.pricingContent.refundPolicy}
-                onChange={(e) => setFormData(prev => ({
+                onChange={(v) => setFormData(prev => ({
                   ...prev,
                   pricingContent: {
                     ...prev.pricingContent,
-                    refundPolicy: e.target.value,
+                    refundPolicy: v,
                   },
                 }))}
                 placeholder="All orders are non-cancellable and all fees..."
+                editorMinHeight={270}
               />
             </div>
           </div>
@@ -548,12 +548,11 @@ const HowToBuyTabForm = ({ agent, onUpdate }) => {
             </div>
             <div className="mb-3">
               <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows="3"
+              <RichTextEditor
                 value={formData.pricingContent.customPricing.description}
-                onChange={(e) => handleInputChange('customPricing', 'description', e.target.value)}
+                onChange={(v) => handleInputChange('customPricing', 'description', v)}
                 placeholder="Request a private offer to receive a custom quote."
+                editorMinHeight={220}
               />
             </div>
             <div className="mb-3">

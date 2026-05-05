@@ -1,34 +1,33 @@
 import { useState, useEffect } from 'react';
-import { Col, Row, Form, Button } from 'react-bootstrap';
+import { Col, Row, Button } from 'react-bootstrap';
 import IconifyIcon from '@/components/wrappers/IconifyIcon';
 import toast from 'react-hot-toast';
 import { updateAIAgent } from '@/http/AIAgent';
+import RichTextEditor from '@/components/form/RichTextEditor';
+import RichTextHtml from '@/components/form/RichTextHtml';
+import { highlightsHaveContent, isRichTextEmpty, normalizeHighlightsForEditor } from '@/utils/rich-text';
 
 const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormData, onFormDataChange }) => {
   const [formData, setFormData] = useState({
-    highlights: [],
+    highlights: '',
     overview: '',
     shortDescription: '',
-    description: '',
   });
-  const [highlightInput, setHighlightInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
     if (isCreateMode && parentFormData) {
       setFormData({
-        highlights: parentFormData.highlights || [],
+        highlights: normalizeHighlightsForEditor(parentFormData.highlights),
         overview: parentFormData.overview || '',
         shortDescription: parentFormData.shortDescription || '',
-        description: parentFormData.description || '',
       });
     } else if (agent) {
       setFormData({
-        highlights: agent.highlights || [],
+        highlights: normalizeHighlightsForEditor(agent.highlights),
         overview: agent.overview || '',
         shortDescription: agent.shortDescription || '',
-        description: agent.description || '',
       });
     }
   }, [agent, isCreateMode, parentFormData]);
@@ -36,38 +35,33 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
   const handleInputChange = (field, value) => {
     setFormData((prev) => {
       const updated = { ...prev, [field]: value };
-      // If in create mode, update parent formData
       if (isCreateMode && onFormDataChange) {
-        onFormDataChange({ ...parentFormData, ...updated });
+        onFormDataChange({
+          ...parentFormData,
+          ...updated,
+          highlights: updated.highlights,
+          description: null,
+        });
       }
       return updated;
     });
   };
 
-  const addHighlight = () => {
-    if (highlightInput.trim()) {
-      handleInputChange('highlights', [...formData.highlights, highlightInput.trim()]);
-      setHighlightInput('');
-    }
-  };
-
-  const removeHighlight = (index) => {
-    const newHighlights = formData.highlights.filter((_, i) => i !== index);
-    handleInputChange('highlights', newHighlights);
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isCreateMode) {
-      // In create mode, just update parent formData, don't submit
       if (onFormDataChange) {
-        onFormDataChange({ ...parentFormData, ...formData });
+        onFormDataChange({
+          ...parentFormData,
+          ...formData,
+          description: null,
+        });
       }
       return;
     }
     try {
       setLoading(true);
-      await updateAIAgent(agent.id, formData);
+      await updateAIAgent(agent.id, { ...formData, description: null });
       toast.success('Overview updated successfully!');
       setIsEditing(false);
       if (onUpdate) onUpdate();
@@ -81,6 +75,8 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
 
   // Display View (Read-only)
   if (!isEditing && !isCreateMode && agent) {
+    const highlightsHtml = normalizeHighlightsForEditor(agent.highlights);
+
     return (
       <div>
         <div className="d-flex justify-content-between align-items-center mb-4">
@@ -92,54 +88,27 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
         </div>
 
         <Row className="mb-4">
-          {/* Key Highlights Card */}
           <Col lg={6} className="mb-3">
             <div className="border rounded p-4" style={{ height: '100%', backgroundColor: 'white' }}>
               <h3 className="mb-3" style={{ fontSize: '18px', fontWeight: '600' }}>
                 ✨ Key Highlights
               </h3>
-              {agent.highlights && agent.highlights.length > 0 ? (
-                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {agent.highlights.map((highlight, index) => (
-                    <li
-                      key={index}
-                      style={{
-                        fontSize: '15px',
-                        lineHeight: '1.7',
-                        marginBottom: '15px',
-                        paddingLeft: '25px',
-                        position: 'relative',
-                      }}
-                    >
-                      <span
-                        style={{
-                          position: 'absolute',
-                          left: 0,
-                          top: '8px',
-                          width: '8px',
-                          height: '8px',
-                          backgroundColor: '#111A45',
-                          borderRadius: '50%',
-                        }}
-                      ></span>
-                      {highlight}
-                    </li>
-                  ))}
-                </ul>
+              {highlightsHaveContent(agent.highlights) ? (
+                <div style={{ fontSize: '15px', lineHeight: 1.7 }}>
+                  <RichTextHtml html={highlightsHtml} />
+                </div>
               ) : (
                 <p className="text-muted mb-0">No highlights available.</p>
               )}
             </div>
           </Col>
 
-          {/* Details Card */}
           <Col lg={6} className="mb-3">
             <div className="border rounded p-4" style={{ height: '100%', backgroundColor: 'white' }}>
               <h3 className="mb-3" style={{ fontSize: '18px', fontWeight: '600' }}>
                 Details
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                {/* Sold by */}
                 <div>
                   <div style={{ fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>
                     Sold by
@@ -149,7 +118,6 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
                   </div>
                 </div>
 
-                {/* Categories */}
                 <div>
                   <div style={{ fontSize: '13px', marginBottom: '6px' }}>Categories</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -179,7 +147,6 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
                   </div>
                 </div>
 
-                {/* Delivery method */}
                 <div>
                   <div style={{ fontSize: '13px', marginBottom: '6px' }}>Delivery method</div>
                   <span
@@ -193,7 +160,6 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
                   </span>
                 </div>
 
-                {/* Deployed on AWS */}
                 <div>
                   <div style={{ fontSize: '13px', marginBottom: '6px' }}>Deployed on AWS</div>
                   <span
@@ -211,14 +177,18 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
           </Col>
         </Row>
 
-        {/* Description Section */}
         <Row>
           <Col lg={12}>
             <div className="border rounded p-4" style={{ backgroundColor: 'white' }}>
               <div style={{ fontSize: '15px', lineHeight: '1.8' }}>
-                {agent.overview || agent.description || agent.shortDescription || (
-                  <p className="text-muted mb-0">No description available.</p>
-                )}
+                {(() => {
+                  const body = agent.overview || agent.shortDescription || agent.description;
+                  return body && !isRichTextEmpty(body) ? (
+                    <RichTextHtml html={body} style={{ fontSize: '15px', lineHeight: 1.8 }} />
+                  ) : (
+                    <p className="text-muted mb-0">No description available.</p>
+                  );
+                })()}
               </div>
             </div>
           </Col>
@@ -227,7 +197,6 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
     );
   }
 
-  // Edit Form View
   return (
     <form onSubmit={handleSubmit}>
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -242,25 +211,11 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
       <Row>
         <Col lg={12} className="mb-3">
           <label className="form-label">Short Description</label>
-          <textarea
-            className="form-control"
-            rows="3"
+          <RichTextEditor
             value={formData.shortDescription}
-            onChange={(e) => handleInputChange('shortDescription', e.target.value)}
+            onChange={(v) => handleInputChange('shortDescription', v)}
             placeholder="Brief description for listing page"
-          />
-        </Col>
-      </Row>
-
-      <Row>
-        <Col lg={12} className="mb-3">
-          <label className="form-label">Full Description</label>
-          <textarea
-            className="form-control"
-            rows="5"
-            value={formData.description}
-            onChange={(e) => handleInputChange('description', e.target.value)}
-            placeholder="Detailed description"
+            editorMinHeight={220}
           />
         </Col>
       </Row>
@@ -268,12 +223,11 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
       <Row>
         <Col lg={12} className="mb-3">
           <label className="form-label">Overview</label>
-          <textarea
-            className="form-control"
-            rows="6"
+          <RichTextEditor
             value={formData.overview}
-            onChange={(e) => handleInputChange('overview', e.target.value)}
+            onChange={(v) => handleInputChange('overview', v)}
             placeholder="Comprehensive overview"
+            editorMinHeight={310}
           />
         </Col>
       </Row>
@@ -281,43 +235,12 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
       <Row>
         <Col lg={12} className="mb-3">
           <label className="form-label">Key Highlights</label>
-          <div className="d-flex gap-2 mb-2">
-            <input
-              type="text"
-              className="form-control"
-              placeholder="Add a highlight"
-              value={highlightInput}
-              onChange={(e) => setHighlightInput(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addHighlight();
-                }
-              }}
-            />
-            <Button type="button" variant="primary" onClick={addHighlight}>
-              <IconifyIcon icon="bx:plus" />
-            </Button>
-          </div>
-          <div className="border rounded p-3" style={{ minHeight: '100px', maxHeight: '300px', overflowY: 'auto' }}>
-            {formData.highlights.length === 0 ? (
-              <p className="text-muted mb-0">No highlights added</p>
-            ) : (
-              formData.highlights.map((highlight, index) => (
-                <div key={index} className="d-flex justify-content-between align-items-center mb-2 p-2 bg-light rounded">
-                  <span>{highlight}</span>
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => removeHighlight(index)}
-                  >
-                    <IconifyIcon icon="bx:trash" />
-                  </Button>
-                </div>
-              ))
-            )}
-          </div>
+          <RichTextEditor
+            value={formData.highlights}
+            onChange={(v) => handleInputChange('highlights', v)}
+            placeholder="List key highlights — use bullet lists, bold, links, or images"
+            editorMinHeight={310}
+          />
         </Col>
       </Row>
 
@@ -334,4 +257,3 @@ const OverviewTabForm = ({ agent, onUpdate, isCreateMode, formData: parentFormDa
 };
 
 export default OverviewTabForm;
-

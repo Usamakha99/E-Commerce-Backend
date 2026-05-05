@@ -3,6 +3,9 @@ import { Col, Row, Form, Button } from 'react-bootstrap';
 import IconifyIcon from '@/components/wrappers/IconifyIcon';
 import toast from 'react-hot-toast';
 import { updateAIAgent } from '@/http/AIAgent';
+import RichTextEditor from '@/components/form/RichTextEditor';
+import RichTextHtml from '@/components/form/RichTextHtml';
+import { isRichTextEmpty } from '@/utils/rich-text';
 
 const FeaturesTabForm = ({ agent, onUpdate }) => {
   const [formData, setFormData] = useState({
@@ -79,8 +82,8 @@ const FeaturesTabForm = ({ agent, onUpdate }) => {
     if (!agent?.featuresContent) return false;
     const fc = agent.featuresContent;
     return (
-      (fc.trustCenter?.description && fc.trustCenter.description.trim()) ||
-      (fc.buyerGuide?.description && fc.buyerGuide.description.trim())
+      (fc.trustCenter?.description && !isRichTextEmpty(fc.trustCenter.description)) ||
+      (fc.buyerGuide?.description && !isRichTextEmpty(fc.buyerGuide.description))
     );
   };
 
@@ -107,7 +110,7 @@ const FeaturesTabForm = ({ agent, onUpdate }) => {
         ) : (
           <Row>
             {/* Trust Center Card */}
-            {trustCenter.description && trustCenter.description.trim() && (
+            {trustCenter.description && !isRichTextEmpty(trustCenter.description) && (
               <Col lg={6} className="mb-4">
                 <div
                   className="border rounded p-4"
@@ -116,16 +119,9 @@ const FeaturesTabForm = ({ agent, onUpdate }) => {
                   <h3 className="mb-3" style={{ fontSize: '18px', fontWeight: '600' }}>
                     {trustCenter.title || 'Trust Center'}
                   </h3>
-                  <p
-                    style={{
-                      fontSize: '14px',
-                      lineHeight: '1.6',
-                      marginBottom: '16px',
-                      flex: 1,
-                    }}
-                  >
-                    {trustCenter.description}
-                  </p>
+                  <div style={{ fontSize: '14px', lineHeight: '1.6', marginBottom: '16px', flex: 1 }}>
+                    <RichTextHtml html={trustCenter.description} />
+                  </div>
                   {trustCenter.buttonLink && (
                     <Button
                       variant="primary"
@@ -148,7 +144,7 @@ const FeaturesTabForm = ({ agent, onUpdate }) => {
             )}
 
             {/* Buyer Guide Card */}
-            {buyerGuide.description && buyerGuide.description.trim() && (
+            {buyerGuide.description && !isRichTextEmpty(buyerGuide.description) && (
               <Col lg={6} className="mb-4">
                 <div
                   className="border rounded p-4"
@@ -157,16 +153,9 @@ const FeaturesTabForm = ({ agent, onUpdate }) => {
                   <h3 className="mb-3" style={{ fontSize: '18px', fontWeight: '600' }}>
                     {buyerGuide.title || 'Buyer Guide'}
                   </h3>
-                  <p
-                    style={{
-                      fontSize: '15px',
-                      lineHeight: '1.7',
-                      marginBottom: '20px',
-                      flex: 1,
-                    }}
-                  >
-                    {buyerGuide.description}
-                  </p>
+                  <div style={{ fontSize: '15px', lineHeight: '1.7', marginBottom: '20px', flex: 1 }}>
+                    <RichTextHtml html={buyerGuide.description} />
+                  </div>
                   {buyerGuide.buttonLink && (
                     <Button
                       variant="outline-primary"
@@ -218,12 +207,11 @@ const FeaturesTabForm = ({ agent, onUpdate }) => {
             </div>
             <div className="mb-3">
               <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows="4"
+              <RichTextEditor
                 value={formData.featuresContent.trustCenter.description}
-                onChange={(e) => handleInputChange('trustCenter', 'description', e.target.value)}
+                onChange={(v) => handleInputChange('trustCenter', 'description', v)}
                 placeholder="Access real-time vendor security and compliance information..."
+                editorMinHeight={260}
               />
             </div>
             <div className="mb-3">
@@ -262,12 +250,11 @@ const FeaturesTabForm = ({ agent, onUpdate }) => {
             </div>
             <div className="mb-3">
               <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows="4"
+              <RichTextEditor
                 value={formData.featuresContent.buyerGuide.description}
-                onChange={(e) => handleInputChange('buyerGuide', 'description', e.target.value)}
+                onChange={(v) => handleInputChange('buyerGuide', 'description', v)}
                 placeholder="Gain valuable insights from real users..."
+                editorMinHeight={260}
               />
             </div>
             <div className="mb-3">

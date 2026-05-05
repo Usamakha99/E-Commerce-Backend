@@ -1,6 +1,26 @@
 const db = require("../config/db");
 const { Op } = require("sequelize");
 const AIAgent = db.AIAgent;
+
+function escapeHtmlText(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Highlights: string (HTML from rich editor), legacy JSON array → HTML, or omit (undefined). */
+function normalizeHighlightsForDb(highlights) {
+  if (highlights === undefined) return undefined;
+  if (highlights === null) return "";
+  if (typeof highlights === "string") return highlights;
+  if (Array.isArray(highlights)) {
+    if (highlights.length === 0) return "";
+    return `<ul>${highlights.map((item) => `<li>${escapeHtmlText(item)}</li>`).join("")}</ul>`;
+  }
+  return "";
+}
 const AICategory = db.AICategory;
 const DeliveryMethod = db.DeliveryMethod;
 const Publisher = db.Publisher;
@@ -74,7 +94,7 @@ exports.createAIAgent = async (req, res) => {
       shortDescription,
       description,
       overview,
-      highlights: highlights || [],
+      highlights: normalizeHighlightsForDb(highlights) ?? "",
       badges: badges || [],
       videoThumbnail,
       rating: rating || 0,
@@ -420,6 +440,8 @@ exports.updateAIAgent = async (req, res) => {
       }
     }
 
+    const nextHighlights = normalizeHighlightsForDb(highlights);
+
     // Update agent
     await agent.update({
       name,
@@ -429,7 +451,7 @@ exports.updateAIAgent = async (req, res) => {
       shortDescription,
       description,
       overview,
-      highlights,
+      ...(nextHighlights !== undefined ? { highlights: nextHighlights } : {}),
       badges,
       videoThumbnail,
       rating,

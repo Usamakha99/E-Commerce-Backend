@@ -3,6 +3,9 @@ import { Col, Row, Form, Button } from 'react-bootstrap';
 import IconifyIcon from '@/components/wrappers/IconifyIcon';
 import toast from 'react-hot-toast';
 import { updateAIAgent } from '@/http/AIAgent';
+import RichTextEditor from '@/components/form/RichTextEditor';
+import RichTextHtml from '@/components/form/RichTextHtml';
+import { isRichTextEmpty } from '@/utils/rich-text';
 
 const SupportTabForm = ({ agent, onUpdate }) => {
   const [formData, setFormData] = useState({
@@ -83,10 +86,10 @@ const SupportTabForm = ({ agent, onUpdate }) => {
     if (!agent?.supportContent) return false;
     const sc = agent.supportContent;
     return (
-      (sc.vendorSupport?.description && sc.vendorSupport.description.trim()) ||
+      (sc.vendorSupport?.description && !isRichTextEmpty(sc.vendorSupport.description)) ||
       (sc.vendorSupport?.email && sc.vendorSupport.email.trim()) ||
       (sc.vendorSupport?.website && sc.vendorSupport.website.trim()) ||
-      (sc.awsSupport?.description && sc.awsSupport.description.trim())
+      (sc.awsSupport?.description && !isRichTextEmpty(sc.awsSupport.description))
     );
   };
 
@@ -117,9 +120,9 @@ const SupportTabForm = ({ agent, onUpdate }) => {
                 {vendorSupport.title || 'Vendor support'}
               </h3>
               
-              {vendorSupport.description && vendorSupport.description.trim() ? (
+              {vendorSupport.description && !isRichTextEmpty(vendorSupport.description) ? (
                 <>
-                  <p
+                  <div
                     style={{
                       fontSize: '14px',
                       lineHeight: '1.6',
@@ -127,8 +130,8 @@ const SupportTabForm = ({ agent, onUpdate }) => {
                       flex: 1,
                     }}
                   >
-                    {vendorSupport.description}
-                  </p>
+                    <RichTextHtml html={vendorSupport.description} />
+                  </div>
                   
                   {/* Support Links */}
                   {(vendorSupport.website || vendorSupport.email) && (
@@ -206,9 +209,9 @@ const SupportTabForm = ({ agent, onUpdate }) => {
                 {awsSupport.title || 'AWS infrastructure support'}
               </h3>
               
-              {awsSupport.description && awsSupport.description.trim() ? (
+              {awsSupport.description && !isRichTextEmpty(awsSupport.description) ? (
                 <>
-                  <p
+                  <div
                     style={{
                       fontSize: '14px',
                       lineHeight: '1.6',
@@ -216,8 +219,8 @@ const SupportTabForm = ({ agent, onUpdate }) => {
                       flex: 1,
                     }}
                   >
-                    {awsSupport.description}
-                  </p>
+                    <RichTextHtml html={awsSupport.description} />
+                  </div>
                   {awsSupport.buttonLink && (
                     <Button
                       variant="outline-primary"
@@ -275,12 +278,11 @@ const SupportTabForm = ({ agent, onUpdate }) => {
             </div>
             <div className="mb-3">
               <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows="5"
+              <RichTextEditor
                 value={formData.supportContent.vendorSupport.description}
-                onChange={(e) => handleInputChange('vendorSupport', 'description', e.target.value)}
+                onChange={(v) => handleInputChange('vendorSupport', 'description', v)}
                 placeholder="Through our expert teams and robust digital resources..."
+                editorMinHeight={270}
               />
             </div>
             <div className="mb-3">
@@ -320,12 +322,11 @@ const SupportTabForm = ({ agent, onUpdate }) => {
             </div>
             <div className="mb-3">
               <label className="form-label">Description</label>
-              <textarea
-                className="form-control"
-                rows="5"
+              <RichTextEditor
                 value={formData.supportContent.awsSupport.description}
-                onChange={(e) => handleInputChange('awsSupport', 'description', e.target.value)}
+                onChange={(v) => handleInputChange('awsSupport', 'description', v)}
                 placeholder="AWS Support is a one-on-one, fast-response support channel..."
+                editorMinHeight={270}
               />
             </div>
             <div className="mb-3">

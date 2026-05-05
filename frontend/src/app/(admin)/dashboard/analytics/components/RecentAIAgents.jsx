@@ -3,6 +3,7 @@ import { Card, CardBody, CardTitle, Table, Badge } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import { getAIAgents } from '@/http/AIAgent';
 import IconifyIcon from '@/components/wrappers/IconifyIcon';
+import { stripHtml } from '@/utils/rich-text';
 import toast from 'react-hot-toast';
 
 const RecentAIAgents = () => {
@@ -59,7 +60,9 @@ const RecentAIAgents = () => {
                 </tr>
               </thead>
               <tbody>
-                {agents.map((agent) => (
+                {agents.map((agent) => {
+                  const shortPlain = agent.shortDescription ? stripHtml(agent.shortDescription) : '';
+                  return (
                   <tr key={agent.id}>
                     <td>
                       <div className="d-flex align-items-center">
@@ -85,9 +88,9 @@ const RecentAIAgents = () => {
                           >
                             {agent.name}
                           </Link>
-                          {agent.shortDescription && (
+                          {shortPlain && (
                             <small className="d-block text-muted text-truncate" style={{ maxWidth: '200px' }}>
-                              {agent.shortDescription}
+                              {shortPlain}
                             </small>
                           )}
                         </div>
@@ -110,7 +113,8 @@ const RecentAIAgents = () => {
                       </Badge>
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </Table>
           </div>

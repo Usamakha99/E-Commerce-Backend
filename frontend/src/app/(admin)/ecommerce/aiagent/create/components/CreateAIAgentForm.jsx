@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import IconifyIcon from '@/components/wrappers/IconifyIcon';
 import toast from 'react-hot-toast';
 import { createAIAgent, updateAIAgent, getCategoriesWithCounts, getDeliveryMethodsWithCounts, getPublishersWithCounts } from '@/http/AIAgent';
+import RichTextEditor from '@/components/form/RichTextEditor';
+import { normalizeHighlightsForEditor } from '@/utils/rich-text';
 
 const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
   const navigate = useNavigate();
@@ -19,9 +21,8 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
     provider: '',
     logo: '',
     shortDescription: '',
-    description: '',
     overview: '',
-    highlights: [],
+    highlights: '',
     badges: [],
     videoThumbnail: '',
     rating: 0,
@@ -92,7 +93,6 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
     },
   });
 
-  const [highlightInput, setHighlightInput] = useState('');
   const [badgeInput, setBadgeInput] = useState('');
   const [resourceLinkInput, setResourceLinkInput] = useState({ title: '', url: '' });
 
@@ -115,9 +115,8 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
         provider: initialData.provider || '',
         logo: initialData.logo || '',
         shortDescription: initialData.shortDescription || '',
-        description: initialData.description || '',
         overview: initialData.overview || '',
-        highlights: initialData.highlights || [],
+        highlights: normalizeHighlightsForEditor(initialData.highlights),
         badges: initialData.badges || [],
         videoThumbnail: initialData.videoThumbnail || '',
         rating: initialData.rating || 0,
@@ -199,18 +198,6 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
     }
   };
 
-  const addHighlight = () => {
-    if (highlightInput.trim()) {
-      handleInputChange('highlights', [...formData.highlights, highlightInput.trim()]);
-      setHighlightInput('');
-    }
-  };
-
-  const removeHighlight = (index) => {
-    const newHighlights = formData.highlights.filter((_, i) => i !== index);
-    handleInputChange('highlights', newHighlights);
-  };
-
   const addBadge = () => {
     if (badgeInput.trim()) {
       handleInputChange('badges', [...formData.badges, badgeInput.trim()]);
@@ -274,6 +261,7 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
       setLoading(true);
       const submitData = {
         ...formData,
+        description: null,
         categoryIds: formData.categoryIds.map(id => parseInt(id)),
         deliveryMethodId: formData.deliveryMethodId ? parseInt(formData.deliveryMethodId) : null,
         publisherId: formData.publisherId ? parseInt(formData.publisherId) : null,
@@ -516,25 +504,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
           <Row>
             <Col lg={12} className="mb-3">
               <label className="form-label">Short Description</label>
-              <textarea
-                className="form-control"
-                rows="3"
+              <RichTextEditor
                 value={formData.shortDescription}
-                onChange={(e) => handleInputChange('shortDescription', e.target.value)}
+                onChange={(v) => handleInputChange('shortDescription', v)}
                 placeholder="Brief description for listing page"
-              />
-            </Col>
-          </Row>
-
-          <Row>
-            <Col lg={12} className="mb-3">
-              <label className="form-label">Full Description</label>
-              <textarea
-                className="form-control"
-                rows="5"
-                value={formData.description}
-                onChange={(e) => handleInputChange('description', e.target.value)}
-                placeholder="Detailed description"
+                editorMinHeight={220}
               />
             </Col>
           </Row>
@@ -542,12 +516,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
           <Row>
             <Col lg={12} className="mb-3">
               <label className="form-label">Overview</label>
-              <textarea
-                className="form-control"
-                rows="6"
+              <RichTextEditor
                 value={formData.overview}
-                onChange={(e) => handleInputChange('overview', e.target.value)}
+                onChange={(v) => handleInputChange('overview', v)}
                 placeholder="Comprehensive overview"
+                editorMinHeight={310}
               />
             </Col>
           </Row>
@@ -555,43 +528,12 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
           <Row>
             <Col lg={12} className="mb-3">
               <label className="form-label">Key Highlights</label>
-              <div className="d-flex gap-2 mb-2">
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Add a highlight"
-                  value={highlightInput}
-                  onChange={(e) => setHighlightInput(e.target.value)}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addHighlight();
-                    }
-                  }}
-                />
-                <Button type="button" variant="primary" onClick={addHighlight}>
-                  <IconifyIcon icon="bx:plus" />
-                </Button>
-              </div>
-              <div className="border rounded p-3" style={{ minHeight: '100px', maxHeight: '300px', overflowY: 'auto' }}>
-                {formData.highlights.length === 0 ? (
-                  <p className="text-muted mb-0">No highlights added</p>
-                ) : (
-                  formData.highlights.map((highlight, index) => (
-                    <div key={index} className="d-flex justify-content-between align-items-center mb-2 p-2 bg-light rounded">
-                      <span>{highlight}</span>
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        onClick={() => removeHighlight(index)}
-                      >
-                        <IconifyIcon icon="bx:trash" />
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </div>
+              <RichTextEditor
+                value={formData.highlights}
+                onChange={(v) => handleInputChange('highlights', v)}
+                placeholder="List key highlights — use bullet lists, bold, links, or images"
+                editorMinHeight={310}
+              />
             </Col>
           </Row>
         </div>
@@ -616,12 +558,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    rows="4"
+                  <RichTextEditor
                     value={formData.featuresContent.trustCenter.description}
-                    onChange={(e) => handleDeepNestedInputChange('featuresContent', 'trustCenter', 'description', e.target.value)}
+                    onChange={(v) => handleDeepNestedInputChange('featuresContent', 'trustCenter', 'description', v)}
                     placeholder="Access real-time vendor security..."
+                    editorMinHeight={260}
                   />
                 </div>
                 <div className="mb-3">
@@ -660,12 +601,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    rows="4"
+                  <RichTextEditor
                     value={formData.featuresContent.buyerGuide.description}
-                    onChange={(e) => handleDeepNestedInputChange('featuresContent', 'buyerGuide', 'description', e.target.value)}
+                    onChange={(v) => handleDeepNestedInputChange('featuresContent', 'buyerGuide', 'description', v)}
                     placeholder="Gain valuable insights..."
+                    editorMinHeight={260}
                   />
                 </div>
                 <div className="mb-3">
@@ -791,12 +731,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    rows="5"
+                  <RichTextEditor
                     value={formData.supportContent.vendorSupport.description}
-                    onChange={(e) => handleDeepNestedInputChange('supportContent', 'vendorSupport', 'description', e.target.value)}
+                    onChange={(v) => handleDeepNestedInputChange('supportContent', 'vendorSupport', 'description', v)}
                     placeholder="Through our expert teams..."
+                    editorMinHeight={270}
                   />
                 </div>
                 <div className="mb-3">
@@ -836,12 +775,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    rows="5"
+                  <RichTextEditor
                     value={formData.supportContent.awsSupport.description}
-                    onChange={(e) => handleDeepNestedInputChange('supportContent', 'awsSupport', 'description', e.target.value)}
+                    onChange={(v) => handleDeepNestedInputChange('supportContent', 'awsSupport', 'description', v)}
                     placeholder="AWS Support is a one-on-one..."
+                    editorMinHeight={270}
                   />
                 </div>
                 <div className="mb-3">
@@ -927,12 +865,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    rows="3"
+                  <RichTextEditor
                     value={formData.pricingContent.freeTrial.description}
-                    onChange={(e) => handleDeepNestedInputChange('pricingContent', 'freeTrial', 'description', e.target.value)}
+                    onChange={(v) => handleDeepNestedInputChange('pricingContent', 'freeTrial', 'description', v)}
                     placeholder="Try this product free according to the free trial terms..."
+                    editorMinHeight={220}
                   />
                 </div>
                 <div className="mb-3">
@@ -964,12 +901,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Pricing Description</label>
-                  <textarea
-                    className="form-control"
-                    rows="4"
+                  <RichTextEditor
                     value={formData.pricingContent.pricing.description}
-                    onChange={(e) => handleDeepNestedInputChange('pricingContent', 'pricing', 'description', e.target.value)}
+                    onChange={(v) => handleDeepNestedInputChange('pricingContent', 'pricing', 'description', v)}
                     placeholder="Pricing is based on the duration and terms of your contract..."
+                    editorMinHeight={270}
                   />
                 </div>
               </div>
@@ -982,12 +918,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 <h5 className="mb-3">Vendor Refund Policy</h5>
                 <div className="mb-3">
                   <label className="form-label">Refund Policy Text</label>
-                  <textarea
-                    className="form-control"
-                    rows="4"
+                  <RichTextEditor
                     value={formData.pricingContent.refundPolicy}
-                    onChange={(e) => handleNestedInputChange('pricingContent', 'refundPolicy', e.target.value)}
+                    onChange={(v) => handleNestedInputChange('pricingContent', 'refundPolicy', v)}
                     placeholder="All orders are non-cancellable and all fees..."
+                    editorMinHeight={270}
                   />
                 </div>
               </div>
@@ -1008,12 +943,11 @@ const CreateAIAgentForm = ({ isEditMode, initialData, agentId }) => {
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Description</label>
-                  <textarea
-                    className="form-control"
-                    rows="3"
+                  <RichTextEditor
                     value={formData.pricingContent.customPricing.description}
-                    onChange={(e) => handleDeepNestedInputChange('pricingContent', 'customPricing', 'description', e.target.value)}
+                    onChange={(v) => handleDeepNestedInputChange('pricingContent', 'customPricing', 'description', v)}
                     placeholder="Request a private offer to receive a custom quote."
+                    editorMinHeight={220}
                   />
                 </div>
                 <div className="mb-3">
