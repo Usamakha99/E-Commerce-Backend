@@ -10,6 +10,10 @@ function escapeHtmlText(text) {
     .replace(/"/g, "&quot;");
 }
 
+function looksLikeHtml(text) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(text || ""));
+}
+
 /** Highlights: string (HTML from rich editor), legacy JSON array → HTML, or omit (undefined). */
 function normalizeHighlightsForDb(highlights) {
   if (highlights === undefined) return undefined;
@@ -17,6 +21,10 @@ function normalizeHighlightsForDb(highlights) {
   if (typeof highlights === "string") return highlights;
   if (Array.isArray(highlights)) {
     if (highlights.length === 0) return "";
+    const hasHtmlChunks = highlights.some((item) => looksLikeHtml(item));
+    if (hasHtmlChunks) {
+      return highlights.map((item) => String(item || "")).join("");
+    }
     return `<ul>${highlights.map((item) => `<li>${escapeHtmlText(item)}</li>`).join("")}</ul>`;
   }
   return "";

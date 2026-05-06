@@ -27,11 +27,19 @@ function escapeHtmlText(text) {
     .replace(/"/g, '&quot;');
 }
 
+function looksLikeHtml(text) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(text || ''));
+}
+
 /** Legacy highlights were JSON arrays; editors use HTML. Returns HTML safe for RichTextEditor. */
 export function normalizeHighlightsForEditor(raw) {
   if (raw == null || raw === '') return '';
   if (typeof raw === 'string') return raw;
   if (Array.isArray(raw) && raw.length > 0) {
+    const hasHtmlChunks = raw.some((item) => looksLikeHtml(item));
+    if (hasHtmlChunks) {
+      return raw.map((item) => String(item || '')).join('');
+    }
     return `<ul>${raw.map((item) => `<li>${escapeHtmlText(item)}</li>`).join('')}</ul>`;
   }
   return '';
