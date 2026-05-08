@@ -341,12 +341,11 @@
 // export default ProductAPI;
 
 import axios from 'axios'
-
-const API_BASE_URL = 'http://localhost:5000'
+import { getBackendBaseUrl } from '@/helpers/backendBaseUrl'
 
 // Create axios instance with default config
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getBackendBaseUrl(),
   timeout: 30000,
 })
 

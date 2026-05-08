@@ -1,10 +1,9 @@
 // frontend/src/http/productForImport.js
 import axios from 'axios';
-
-const API_BASE_URL = 'http://localhost:5000';
+import { getBackendBaseUrl } from '@/helpers/backendBaseUrl';
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getBackendBaseUrl(),
   timeout: 30000,
 });
 

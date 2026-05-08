@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import ReactTable from '@/components/Table'
 import IconifyIcon from '@/components/wrappers/IconifyIcon'
 import { getProducts, deleteProduct } from '@/http/Product'
+import { getBackendBaseUrl } from '@/helpers/backendBaseUrl'
 import EditProductForm from './EditProductForm'
 
 const ProductsListTable = () => {
@@ -245,7 +246,7 @@ const ProductsListTable = () => {
             <Link to={`/ecommerce/products/${id}`}>
               <div className="position-relative">
                 <img
-                  src={`http://localhost:5000/uploads/products/${mainImage}`}
+                  src={`${getBackendBaseUrl()}/uploads/products/${mainImage}`}
                   alt={title}
                   className="img-fluid avatar-lg rounded"
                   onError={(e) => {

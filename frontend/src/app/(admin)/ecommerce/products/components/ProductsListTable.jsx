@@ -6,6 +6,7 @@ import ReactTable from '@/components/Table'
 import IconifyIcon from '@/components/wrappers/IconifyIcon'
 import { currency } from '@/context/constants'
 import { getProducts } from '@/http/Product'
+import { getBackendBaseUrl } from '@/helpers/backendBaseUrl'
 import { getStockStatus } from '@/utils/other'
 
 const DEFAULT_PAGE_SIZE = 20
@@ -65,7 +66,7 @@ const ProductsListTable = () => {
         <div className="d-flex align-items-center">
           <div className="flex-shrink-0 me-3">
             <Link to={`/ecommerce/products/${id}`}>
-              <img src={`http://localhost:5000/uploads/products/${mainImage}`} alt={title} className="img-fluid avatar-sm" />
+              <img src={`${getBackendBaseUrl()}/uploads/products/${mainImage}`} alt={title} className="img-fluid avatar-sm" />
             </Link>
           </div>
           <div className="flex-grow-1">

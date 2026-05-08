@@ -23,12 +23,10 @@
 
 
 import axios from "axios";
-
-// Set this to your backend host. For local development use localhost or machine IP.
-const BACKEND_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { getBackendBaseUrl } from "@/helpers/backendBaseUrl";
 
 const api = axios.create({
-  baseURL: BACKEND_BASE,
+  baseURL: getBackendBaseUrl(),
   withCredentials: false, // set true if you use cookies; false for pure JWT auth
   headers: {
     "Content-Type": "application/json",

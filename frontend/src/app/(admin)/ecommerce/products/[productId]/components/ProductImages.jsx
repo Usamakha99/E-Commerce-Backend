@@ -38,6 +38,7 @@
 // src/pages/ecommerce/components/ProductImages.jsx
 import { useState } from 'react';
 import { Card, CardBody } from 'react-bootstrap';
+import { getBackendBaseUrl } from '@/helpers/backendBaseUrl';
 
 const ProductImages = ({ product }) => {
   const [selectedImage, setSelectedImage] = useState(0);
@@ -74,7 +75,7 @@ const ProductImages = ({ product }) => {
         {/* Main Image */}
         <div className="text-center mb-3">
           <img 
-            src={`http://localhost:5000/uploads/products/${allImages[selectedImage]?.url}`}
+            src={`${getBackendBaseUrl()}/uploads/products/${allImages[selectedImage]?.url}`}
             alt={allImages[selectedImage]?.imageTitle || 'Product Image'}
             className="img-fluid"
             style={{ maxHeight: '400px', objectFit: 'contain' }}
@@ -92,7 +93,7 @@ const ProductImages = ({ product }) => {
                 style={{ width: '60px', height: '60px' }}
               >
                 <img 
-                  src={`http://localhost:5000/uploads/products/${image.url}`}
+                  src={`${getBackendBaseUrl()}/uploads/products/${image.url}`}
                   alt={image.imageTitle || `Thumbnail ${index + 1}`}
                   className="img-fluid h-100 w-100"
                   style={{ objectFit: 'cover' }}

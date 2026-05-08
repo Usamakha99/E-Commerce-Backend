@@ -1,11 +1,10 @@
 
 // src/http/api.js
 import axios from "axios";
-
-const BACKEND_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { getBackendBaseUrl } from "@/helpers/backendBaseUrl";
 
 const api = axios.create({
-  baseURL: BACKEND_BASE,
+  baseURL: getBackendBaseUrl(),
   withCredentials: false,
   timeout: 60000, // 60s for slow endpoints (e.g. products list with 20k+ DB)
   headers: {
