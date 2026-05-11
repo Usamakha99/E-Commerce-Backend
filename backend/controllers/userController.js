@@ -1,6 +1,12 @@
 const db = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const {
+  setAuthCookies,
+  clearAuthCookies,
+  getAccessTokenFromCookies,
+  getRefreshTokenFromCookies,
+} = require("../utils/authCookies");
 const crypto = require("crypto");
 const emailService = require("../services/emailService");
 const multer = require("multer");
@@ -251,6 +257,8 @@ const verifyEmail = async (req, res) => {
       }]
     });
 
+    setAuthCookies(res, tokens);
+
     res.status(200).json({
       success: true,
       message: "Email verified successfully!",
@@ -311,6 +319,8 @@ const login = async (req, res) => {
         as: 'profile'
       }]
     });
+
+    setAuthCookies(res, tokens);
 
     res.status(200).json({
       success: true,
@@ -593,7 +603,7 @@ const deleteUser = async (req, res) => {
 
 // ====================== REFRESH TOKEN ======================
 const refreshToken = (req, res) => {
-  const { token } = req.body;
+  const token = req.body?.token || getRefreshTokenFromCookies(req);
   if (!token) {
     return res.status(401).json({ 
       success: false,
@@ -617,6 +627,7 @@ const refreshToken = (req, res) => {
     }
 
     const tokens = generateTokens(user);
+    setAuthCookies(res, tokens);
     res.json({
       success: true,
       data: tokens
@@ -626,13 +637,18 @@ const refreshToken = (req, res) => {
 
 // ====================== LOGOUT ======================
 const logout = (req, res) => {
-  const token = req.headers["authorization"]?.split(" ")[1];
+  const headerToken = req.headers["authorization"]?.split(" ")[1];
+  const token = headerToken || getAccessTokenFromCookies(req);
   if (token) tokenBlacklist.push(token);
 
-  const { refreshToken } = req.body;
-  if (refreshToken) {
-    refreshTokens = refreshTokens.filter((t) => t !== refreshToken);
+  const refreshFromBody = req.body?.refreshToken;
+  const refreshFromCookie = getRefreshTokenFromCookies(req);
+  const refresh = refreshFromBody || refreshFromCookie;
+  if (refresh) {
+    refreshTokens = refreshTokens.filter((t) => t !== refresh);
   }
+
+  clearAuthCookies(res);
 
   res.json({ 
     success: true,

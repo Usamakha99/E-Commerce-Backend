@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import httpClient from "@/helpers/httpClient";
 
 // Create the context
 const AuthContext = createContext();
@@ -9,75 +10,92 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check if user is logged in on app start
-  useEffect(() => {
-    console.log("🔍 Checking for existing authentication...");
-    
-    try {
-      const authData = localStorage.getItem("auth");
-      
-      if (authData) {
-        const parsed = JSON.parse(authData);
-        console.log("📦 Found auth data:", parsed);
-        
-        if (parsed.token && parsed.user) {
-          setToken(parsed.token);
-          setUser(parsed.user);
-          console.log("✅ User authenticated from localStorage");
-        } else {
-          console.log("❌ Invalid auth data in storage");
-          clearAuth();
-        }
-      } else {
-        console.log("ℹ️ No auth data found in localStorage");
-      }
-    } catch (error) {
-      console.error("❌ Error loading auth data:", error);
-      clearAuth();
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  // Save session after login
-  const saveSession = (sessionData) => {
-    console.log("💾 Saving session:", sessionData);
-    
-    if (sessionData && sessionData.token && sessionData.user) {
-      const authData = {
-        token: sessionData.token,
-        user: sessionData.user,
-        timestamp: new Date().getTime()
-      };
-      
-      // Save to localStorage
-      localStorage.setItem("auth", JSON.stringify(authData));
-      
-      // Update state
-      setToken(sessionData.token);
-      setUser(sessionData.user);
-      
-      console.log("✅ Session saved successfully!");
-      console.log("👤 User:", sessionData.user.email);
-      console.log("🔑 Token exists:", !!sessionData.token);
-      
-      return true;
-    } else {
-      console.error("❌ Cannot save session - missing token or user");
-      return false;
-    }
-  };
-
-  // Clear session (logout)
-  const clearAuth = () => {
+  const clearAuth = useCallback(() => {
     localStorage.removeItem("auth");
     setUser(null);
     setToken(null);
-    console.log("🧹 Auth cleared");
+  }, []);
+
+  // Restore from localStorage + validate httpOnly cookie / Bearer with server
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const authData = localStorage.getItem("auth");
+        if (authData) {
+          const parsed = JSON.parse(authData);
+          if (parsed?.user) {
+            setUser(parsed.user);
+            if (parsed.token) setToken(parsed.token);
+          } else {
+            clearAuth();
+          }
+        }
+      } catch {
+        clearAuth();
+      }
+
+      try {
+        const res = await httpClient.get("/api/users/profile");
+        if (cancelled) return;
+        if (res.data?.success && res.data?.data) {
+          const u = res.data.data;
+          setUser(u);
+          const raw = localStorage.getItem("auth");
+          let prev = {};
+          try {
+            prev = raw ? JSON.parse(raw) : {};
+          } catch {
+            prev = {};
+          }
+          localStorage.setItem(
+            "auth",
+            JSON.stringify({
+              ...prev,
+              user: u,
+              timestamp: Date.now(),
+            })
+          );
+        }
+      } catch (e) {
+        if (cancelled) return;
+        if (e?.response?.status === 401) {
+          clearAuth();
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearAuth]);
+
+  // Save session after login (JWT may live only in httpOnly cookies; user is cached in localStorage)
+  const saveSession = (sessionData) => {
+    if (!sessionData?.user) {
+      return false;
+    }
+
+    const authData = {
+      user: sessionData.user,
+      timestamp: Date.now(),
+    };
+    if (sessionData.token) {
+      authData.token = sessionData.token;
+    }
+
+    localStorage.setItem("auth", JSON.stringify(authData));
+    setUser(sessionData.user);
+    setToken(sessionData.token || null);
+
+    return true;
   };
 
-  // Check if user is authenticated
-  const isAuthenticated = !!token && !!user;
+  // Check if user is authenticated (tokens can be httpOnly cookies only)
+  const isAuthenticated = !!user;
 
   // Context value
   const value = {
@@ -86,7 +104,8 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated,
     isLoading,
     saveSession,
-    clearAuth
+    clearAuth,
+    clearSession: clearAuth,
   };
 
   return (

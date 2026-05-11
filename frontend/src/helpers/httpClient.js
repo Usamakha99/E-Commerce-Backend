@@ -27,7 +27,7 @@ import { getBackendBaseUrl } from "@/helpers/backendBaseUrl";
 
 const api = axios.create({
   baseURL: getBackendBaseUrl(),
-  withCredentials: false, // set true if you use cookies; false for pure JWT auth
+  withCredentials: true, // send httpOnly auth cookies to the API
   headers: {
     "Content-Type": "application/json",
     Accept: "application/json",

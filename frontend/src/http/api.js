@@ -5,7 +5,7 @@ import { getBackendBaseUrl } from "@/helpers/backendBaseUrl";
 
 const api = axios.create({
   baseURL: getBackendBaseUrl(),
-  withCredentials: false,
+  withCredentials: true,
   timeout: 60000, // 60s for slow endpoints (e.g. products list with 20k+ DB)
   headers: {
     "Content-Type": "application/json",

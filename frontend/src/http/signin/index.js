@@ -22,13 +22,10 @@ export const useSignIn = () => {
       console.log('✅ Login successful - Full response:', data);
       
       if (data.success && data.data) {
-        // Save the complete session data
         const sessionData = {
-          token: data.data.accessToken,
-          refreshToken: data.data.refreshToken,
-          user: data.data.user
+          user: data.data.user,
+          ...(data.data.accessToken ? { token: data.data.accessToken } : {}),
         };
-        
         saveSession(sessionData);
         
         showNotification({

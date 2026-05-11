@@ -36,6 +36,8 @@
 // module.exports = { protect };
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
+const { getAccessTokenFromCookies } = require('../utils/authCookies');
+const { tokenBlacklist } = require('../controllers/userController');
 const User = db.User;
 
 const protect = async (req, res, next) => {
@@ -45,8 +47,18 @@ const protect = async (req, res, next) => {
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
+    if (!token) {
+      token = getAccessTokenFromCookies(req);
+    }
 
     if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authorized to access this route'
+      });
+    }
+
+    if (Array.isArray(tokenBlacklist) && tokenBlacklist.includes(token)) {
       return res.status(401).json({
         success: false,
         error: 'Not authorized to access this route'

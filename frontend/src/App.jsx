@@ -22,17 +22,14 @@
 import AppProvidersWrapper from './components/wrappers/AppProvidersWrapper';
 import AppRouter from './routes/router';
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider } from './context/AuthContext'; // 👈 ADD THIS
 import '@/assets/scss/app.scss';
 
 const App = () => {
   return (
-    <AuthProvider> {/* 👈 WRAP WITH AUTH PROVIDER */}
-      <AppProvidersWrapper>
-        <AppRouter />
-        <Toaster position="top-right" reverseOrder={false} />
-      </AppProvidersWrapper>
-    </AuthProvider>
+    <AppProvidersWrapper>
+      <AppRouter />
+      <Toaster position="top-right" reverseOrder={false} />
+    </AppProvidersWrapper>
   );
 };
 

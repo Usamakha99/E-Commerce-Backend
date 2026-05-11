@@ -183,14 +183,12 @@ const useSignIn = () => {
       if (responseData.success && responseData.data) {
         console.log("🎉 Login successful!");
         
-        // 3. Prepare session data
+        // 3. Session: JWTs are set as httpOnly cookies by the API; cache user for UI
         const sessionData = {
-          token: responseData.data.accessToken,
-          refreshToken: responseData.data.refreshToken,
-          user: responseData.data.user
+          user: responseData.data.user,
         };
 
-        console.log("📦 Session data to save:", sessionData);
+        console.log("📦 Session data to save (user only; tokens in cookies):", sessionData);
 
         // 4. Save session
         const saveSuccess = saveSession(sessionData);

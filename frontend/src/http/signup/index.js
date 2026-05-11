@@ -38,11 +38,12 @@ const useSignUp = () => {
 
     form.reset();
 
-    // Save session and redirect
-    if (data.token && data.user) {
+    if (data?.user) {
       saveSession({
-        token: data.token,
         user: data.user,
+        ...(data.accessToken || data.token
+          ? { token: data.accessToken || data.token }
+          : {}),
       });
       navigate("/dashboard");
     } else {

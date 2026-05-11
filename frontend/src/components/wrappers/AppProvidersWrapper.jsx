@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { ToastContainer } from 'react-toastify';
 import { DEFAULT_PAGE_TITLE } from '@/context/constants';
-import { AuthProvider } from '@/context/useAuthContext';
+import { AuthProvider } from '@/context/AuthContext';
 import { LayoutProvider } from '@/context/useLayoutContext';
 import { NotificationProvider } from '@/context/useNotificationContext';
 import { HelmetProvider } from 'react-helmet-async';
